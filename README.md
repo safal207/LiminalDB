@@ -21,6 +21,7 @@ powershell -ExecutionPolicy Bypass -File .\scripts\demo-stack.ps1
 
 - Start here: [`docs/START_HERE.md`](docs/START_HERE.md)
 - 5-minute demo: [`docs/demo/FIVE_MINUTE_STACK_DEMO.md`](docs/demo/FIVE_MINUTE_STACK_DEMO.md)
+- Seed Garden demo: [`docs/demo/SEED_GARDEN_DEMO.md`](docs/demo/SEED_GARDEN_DEMO.md)
 - Grant evidence: [`docs/GRANT_EVIDENCE.md`](docs/GRANT_EVIDENCE.md)
 - Architecture: [`docs/`](docs/)
 - Benchmark baseline: [`docs/BENCHMARKS.md`](docs/BENCHMARKS.md)
