@@ -19,6 +19,7 @@ powershell -ExecutionPolicy Bypass -File .\scripts\demo-stack.ps1
 
 ## Review links
 
+- Start here: [`docs/START_HERE.md`](docs/START_HERE.md)
 - Grant evidence: [`docs/GRANT_EVIDENCE.md`](docs/GRANT_EVIDENCE.md)
 - Architecture: [`docs/`](docs/)
 - Benchmark baseline: [`docs/BENCHMARKS.md`](docs/BENCHMARKS.md)
