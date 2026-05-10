@@ -7,10 +7,13 @@
   "types": "dist/index.d.ts",
   "scripts": {
     "build": "tsc -p tsconfig.json",
-    "generate": "node ../../protocol/codegen.js"
+    "generate": "node ../../protocol/codegen.js",
+    "smoke": "tsx examples/smoke.ts",
+    "smoke:require-event": "LIMINAL_SMOKE_REQUIRE_EVENT=1 tsx examples/smoke.ts"
   },
   "dependencies": {},
   "devDependencies": {
+    "tsx": "^4.20.0",
     "typescript": "^5.3.3"
   }
 }
