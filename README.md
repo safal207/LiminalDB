@@ -3,8 +3,16 @@
 ![Status](https://img.shields.io/badge/status-active-brightgreen)
 ![Core](https://img.shields.io/badge/core-rust-blue)
 ![License](https://img.shields.io/badge/license-Apache--2.0-orange)
+[![Tests](https://github.com/safal207/LiminalBD/actions/workflows/ci.yml/badge.svg?branch=main)](https://github.com/safal207/LiminalBD/actions/workflows/ci.yml)
+[![Benchmark evidence](https://img.shields.io/badge/benchmark-evidence%20snapshot-informational)](docs/evidence/BENCHMARK_EVIDENCE_SNAPSHOT.md)
 
 **Project status:** Active core/runtime development with CI coverage and production-focused architecture.
+
+**Validation:** [`cargo test --workspace`](.github/workflows/ci.yml) — see the [Tests](https://github.com/safal207/LiminalBD/actions/workflows/ci.yml) badge above for the latest CI run on `main`.
+
+**Benchmark evidence:** measured single-node baseline with reproducible commands and explicit caveats lives in [`docs/BENCHMARKS.md`](docs/BENCHMARKS.md) and [`docs/evidence/BENCHMARK_EVIDENCE_SNAPSHOT.md`](docs/evidence/BENCHMARK_EVIDENCE_SNAPSHOT.md). Numbers in the README "Performance Targets" table are design targets, not measurements.
+
+**Demo stack:** end-to-end Windows entrypoint is [`scripts/demo-stack.ps1`](scripts/demo-stack.ps1); reproducible flow and troubleshooting in [`docs/STACK_DEMO.md`](docs/STACK_DEMO.md).
 
 **Quick validation:**
 ```bash
