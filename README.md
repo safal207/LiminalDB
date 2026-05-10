@@ -23,6 +23,7 @@ powershell -ExecutionPolicy Bypass -File .\scripts\demo-stack.ps1
 - Grant evidence: [`docs/GRANT_EVIDENCE.md`](docs/GRANT_EVIDENCE.md)
 - Architecture: [`docs/`](docs/)
 - Benchmark baseline: [`docs/BENCHMARKS.md`](docs/BENCHMARKS.md)
+- Benchmark evidence: [`docs/evidence/BENCHMARK_EVIDENCE_SNAPSHOT.md`](docs/evidence/BENCHMARK_EVIDENCE_SNAPSHOT.md)
 - Release + compatibility: [`docs/RELEASE_COMPATIBILITY.md`](docs/RELEASE_COMPATIBILITY.md)
 - Validation: `cargo test --workspace`
 - Security: [`SECURITY.md`](SECURITY.md)
