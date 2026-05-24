@@ -320,7 +320,8 @@ mod tests {
     #[test]
     fn handshake_rejects_stale_messages() {
         let signer = Keypair::generate(&mut OsRng);
-        let handshake = Handshake::sign(&signer, "liminal", 1_000, [2u8; 16]);
+        let nonce: [u8; 16] = rand::random();
+        let handshake = Handshake::sign(&signer, "liminal", 1_000, nonce);
         let err = handshake
             .verify("liminal", 50_000, 10_000)
             .expect_err("handshake should be stale");
