@@ -298,7 +298,7 @@ mod tests {
     fn handshake_roundtrip() {
         let signer = Keypair::generate(&mut OsRng);
         let namespace = "liminal";
-        let nonce = [7u8; 16];
+        let nonce: [u8; 16] = rand::random();
         let now = 1_000_000u64;
         let handshake = Handshake::sign(&signer, namespace, now, nonce);
         handshake
@@ -309,7 +309,8 @@ mod tests {
     #[test]
     fn handshake_rejects_invalid_signature() {
         let signer = Keypair::generate(&mut OsRng);
-        let mut handshake = Handshake::sign(&signer, "liminal", 5_000, [1u8; 16]);
+        let nonce: [u8; 16] = rand::random();
+        let mut handshake = Handshake::sign(&signer, "liminal", 5_000, nonce);
         handshake.signature[0] ^= 0xFF;
         let err = handshake
             .verify("liminal", 6_000, 10_000)
@@ -320,7 +321,8 @@ mod tests {
     #[test]
     fn handshake_rejects_stale_messages() {
         let signer = Keypair::generate(&mut OsRng);
-        let handshake = Handshake::sign(&signer, "liminal", 1_000, [2u8; 16]);
+        let nonce: [u8; 16] = rand::random();
+        let handshake = Handshake::sign(&signer, "liminal", 1_000, nonce);
         let err = handshake
             .verify("liminal", 50_000, 10_000)
             .expect_err("handshake should be stale");
