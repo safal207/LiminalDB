@@ -318,12 +318,12 @@ impl NoeticState {
 mod tests {
     use super::*;
     use crate::peers::PeerId;
-    use ed25519_dalek::Keypair;
+    use ed25519_dalek::SigningKey;
     use rand::rngs::OsRng;
 
     #[test]
     fn summary_digest_changes_with_models() {
-        let signer = Keypair::generate(&mut OsRng);
+        let signer = SigningKey::generate(&mut OsRng);
         let peer = PeerId::from_keypair(&signer);
         let mut state = NoeticState::new(peer);
         let header = ResonantModelHeader {

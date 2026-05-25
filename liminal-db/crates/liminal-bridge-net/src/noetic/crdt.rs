@@ -220,7 +220,7 @@ impl Default for MergeContext {
 mod tests {
     use super::*;
     use crate::peers::PeerId;
-    use ed25519_dalek::Keypair;
+    use ed25519_dalek::SigningKey;
     use rand::rngs::OsRng;
 
     fn ctx(default: f32) -> MergeContext {
@@ -229,8 +229,8 @@ mod tests {
 
     #[test]
     fn hlc_merges_monotonically() {
-        let key_a = Keypair::generate(&mut OsRng);
-        let key_b = Keypair::generate(&mut OsRng);
+        let key_a = SigningKey::generate(&mut OsRng);
+        let key_b = SigningKey::generate(&mut OsRng);
         let mut hlc_a = Hlc::new(PeerId::from_keypair(&key_a), 1_000);
         let hlc_b = Hlc::new(PeerId::from_keypair(&key_b), 1_500);
         hlc_a.tick(1_100);
@@ -241,8 +241,8 @@ mod tests {
 
     #[test]
     fn orset_converges_after_merges() {
-        let key_a = Keypair::generate(&mut OsRng);
-        let key_b = Keypair::generate(&mut OsRng);
+        let key_a = SigningKey::generate(&mut OsRng);
+        let key_b = SigningKey::generate(&mut OsRng);
         let mut set_a = OrSet::<String>::default();
         let mut set_b = OrSet::<String>::default();
         let peer_a = PeerId::from_keypair(&key_a);
@@ -262,8 +262,8 @@ mod tests {
 
     #[test]
     fn pn_counter_converges() {
-        let key_a = Keypair::generate(&mut OsRng);
-        let key_b = Keypair::generate(&mut OsRng);
+        let key_a = SigningKey::generate(&mut OsRng);
+        let key_b = SigningKey::generate(&mut OsRng);
         let peer_a = PeerId::from_keypair(&key_a);
         let peer_b = PeerId::from_keypair(&key_b);
         let mut counter_a = PnCounter::default();
