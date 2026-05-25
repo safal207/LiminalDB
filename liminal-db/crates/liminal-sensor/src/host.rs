@@ -2,7 +2,7 @@ use std::time::Duration;
 
 use rand::{Rng, SeedableRng};
 use rand_chacha::ChaCha8Rng;
-use sysinfo::{CpuRefreshKind, MemoryRefreshKind, RefreshKind, System};
+use sysinfo::{RefreshKind, System};
 use tokio::sync::mpsc;
 use tokio::time::sleep;
 
@@ -10,9 +10,7 @@ use liminal_core::types::{Impulse, ImpulseKind};
 
 pub async fn start_host_sensors(tx: mpsc::Sender<Impulse>) {
     let mut system = System::new_with_specifics(
-        RefreshKind::new()
-            .with_cpu(CpuRefreshKind::everything())
-            .with_memory(MemoryRefreshKind::everything()),
+        RefreshKind::everything()
     );
     let mut tick: f32 = 0.0;
     let mut rng = ChaCha8Rng::seed_from_u64(42);
@@ -21,7 +19,7 @@ pub async fn start_host_sensors(tx: mpsc::Sender<Impulse>) {
         system.refresh_cpu_usage();
         system.refresh_memory();
 
-        let cpu_usage = system.global_cpu_info().cpu_usage() / 100.0;
+        let cpu_usage = system.global_cpu_usage() / 100.0;
         let total_memory = system.total_memory() as f32;
         let free_memory = if total_memory > 0.0 {
             system.available_memory() as f32 / total_memory

@@ -6,6 +6,6 @@ edition = "2021"
 [dependencies]
 liminal-core = { path = "../liminal-core" }
 tokio = { version = "1", features = ["rt", "macros", "time", "sync"] }
-sysinfo = "0.30"
+sysinfo = "0.39"
 rand = "0.8"
 rand_chacha = "0.3"
