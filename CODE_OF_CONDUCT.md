@@ -1,14 +1,11 @@
 # Code of Conduct
 
-## Our Standards
-We are committed to a respectful, harassment-free, and inclusive environment.
+This project adopts and follows the Rust Foundation Code of Conduct:
 
-Examples of expected behavior:
-- constructive and respectful feedback
-- openness to different viewpoints
-- focus on technical merit and collaboration
+https://rustfoundation.org/policy/code-of-conduct/
 
-Unacceptable behavior includes harassment, discrimination, personal attacks, and doxxing.
+## Reporting
 
-## Enforcement
-Report conduct concerns privately to the maintainer. Reports will be reviewed promptly and handled confidentially where possible.
+Please report conduct concerns privately to the maintainer at safal0645@gmail.com.
+
+Reports are handled promptly and confidentially where possible. Maintainers may apply warnings, temporary restrictions, or removal from participation based on severity and repeated behavior.

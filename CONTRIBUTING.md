@@ -233,8 +233,8 @@ cargo test --all
 cargo fmt --all
 cargo clippy --all
 
-# 5. Commit with clear message
-git commit -m "feat: add fuzzy pattern matching with affinity weighting
+# 5. Commit with clear message and DCO sign-off
+git commit -s -m "feat: add fuzzy pattern matching with affinity weighting
 
 - Implement Levenshtein distance for pattern similarity
 - Weight matches by cell affinity values
@@ -246,6 +246,8 @@ Fixes #123"
 # 6. Push and open PR
 git push origin feat/improve-pattern-matching
 ```
+
+By contributing, you agree to sign off commits as described in `DCO.md`.
 
 ## PR Guidelines
 
