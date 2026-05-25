@@ -317,13 +317,13 @@ pub struct ConsensusSnapshot {
 #[cfg(test)]
 mod tests {
     use super::*;
-    use ed25519_dalek::Keypair;
+    use ed25519_dalek::SigningKey;
     use rand::rngs::OsRng;
 
     #[test]
     fn proposal_reaches_quorum() {
-        let signer_a = Keypair::generate(&mut OsRng);
-        let signer_b = Keypair::generate(&mut OsRng);
+        let signer_a = SigningKey::generate(&mut OsRng);
+        let signer_b = SigningKey::generate(&mut OsRng);
         let peer_a = PeerId::from_keypair(&signer_a);
         let peer_b = PeerId::from_keypair(&signer_b);
         let mut engine = ConsensusEngine::new(1.1);
@@ -365,8 +365,8 @@ mod tests {
 
     #[test]
     fn rejected_vote_prevents_commit() {
-        let signer_a = Keypair::generate(&mut OsRng);
-        let signer_b = Keypair::generate(&mut OsRng);
+        let signer_a = SigningKey::generate(&mut OsRng);
+        let signer_b = SigningKey::generate(&mut OsRng);
         let peer_a = PeerId::from_keypair(&signer_a);
         let peer_b = PeerId::from_keypair(&signer_b);
         let mut engine = ConsensusEngine::new(0.8);

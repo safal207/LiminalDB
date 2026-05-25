@@ -3,7 +3,7 @@ use std::fmt;
 use std::time::Duration;
 
 use ed25519_dalek::Signer;
-use ed25519_dalek::{Keypair, PublicKey, Signature, Verifier};
+use ed25519_dalek::{SigningKey, VerifyingKey, Signature, Verifier};
 use parking_lot::RwLock;
 use serde::{Deserialize, Serialize};
 use thiserror::Error;
@@ -18,11 +18,11 @@ impl PeerId {
         PeerId(bytes)
     }
 
-    pub fn from_keypair(key: &Keypair) -> Self {
-        PeerId(key.public.to_bytes())
+    pub fn from_keypair(key: &SigningKey) -> Self {
+        PeerId(key.verifying_key().to_bytes())
     }
 
-    pub fn from_public_key(key: &PublicKey) -> Self {
+    pub fn from_public_key(key: &VerifyingKey) -> Self {
         PeerId(key.to_bytes())
     }
 
@@ -30,8 +30,8 @@ impl PeerId {
         self.0
     }
 
-    pub fn public_key(&self) -> Result<PublicKey, ed25519_dalek::SignatureError> {
-        PublicKey::from_bytes(&self.0)
+    pub fn public_key(&self) -> Result<VerifyingKey, ed25519_dalek::SignatureError> {
+        VerifyingKey::from_bytes(&self.0)
     }
 }
 
@@ -213,7 +213,7 @@ pub struct Handshake {
 
 impl Handshake {
     pub fn sign(
-        signer: &Keypair,
+        signer: &SigningKey,
         namespace: impl Into<String>,
         timestamp_ms: u64,
         nonce: [u8; 16],
@@ -258,7 +258,7 @@ impl Handshake {
             .map_err(|_| HandshakeError::InvalidSignature)?;
         let message = Self::message(&self.peer, &self.namespace, self.timestamp_ms, &self.nonce);
         let signature =
-            Signature::from_bytes(&self.signature).map_err(|_| HandshakeError::InvalidSignature)?;
+            Signature::from_slice(&self.signature).map_err(|_| HandshakeError::InvalidSignature)?;
         verifying_key
             .verify(&message, &signature)
             .map_err(|_| HandshakeError::InvalidSignature)
@@ -296,7 +296,7 @@ mod tests {
 
     #[test]
     fn handshake_roundtrip() {
-        let signer = Keypair::generate(&mut OsRng);
+        let signer = SigningKey::generate(&mut OsRng);
         let namespace = "liminal";
         let nonce: [u8; 16] = rand::random();
         let now = 1_000_000u64;
@@ -308,7 +308,7 @@ mod tests {
 
     #[test]
     fn handshake_rejects_invalid_signature() {
-        let signer = Keypair::generate(&mut OsRng);
+        let signer = SigningKey::generate(&mut OsRng);
         let nonce: [u8; 16] = rand::random();
         let mut handshake = Handshake::sign(&signer, "liminal", 5_000, nonce);
         handshake.signature[0] ^= 0xFF;
@@ -320,7 +320,7 @@ mod tests {
 
     #[test]
     fn handshake_rejects_stale_messages() {
-        let signer = Keypair::generate(&mut OsRng);
+        let signer = SigningKey::generate(&mut OsRng);
         let nonce: [u8; 16] = rand::random();
         let handshake = Handshake::sign(&signer, "liminal", 1_000, nonce);
         let err = handshake
