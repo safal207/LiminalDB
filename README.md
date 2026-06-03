@@ -1,16 +1,18 @@
 # LiminalDB
 
-```markdown
+Federated event-sourced memory layer for local-first and federated services.
+
 ## NGI Fediversity reviewer path
 
 LiminalDB was submitted to NGI Fediversity as an open-source federated event-sourced memory layer for local-first and federated cloud services.
 
 Start here:
 
-- [`docs/FEDIVERSITY_REVIEWER_PATH.md`](docs/FEDIVERSITY_REVIEWER_PATH.md)
-- [`docs/FEDERATED_EVENT_SOURCING_ALIGNMENT.md`](docs/FEDERATED_EVENT_SOURCING_ALIGNMENT.md)
-- [`docs/ACTIVITYPUB_MATRIX_INTEGRATION_PLAN.md`](docs/ACTIVITYPUB_MATRIX_INTEGRATION_PLAN.md)
-- [`docs/BUDGET_AND_MILESTONES_FEDIVERSITY.md`](docs/BUDGET_AND_MILESTONES_FEDIVERSITY.md)
+1. Read [`docs/FEDIVERSITY_REVIEWER_PATH.md`](docs/FEDIVERSITY_REVIEWER_PATH.md).
+2. Run `cargo build --release -p liminal-cli`.
+3. Run `cargo test --workspace`.
+4. Run the Windows demo: `powershell -ExecutionPolicy Bypass -File .\scripts\demo-stack.ps1`.
+5. Compare claims against [`READY_FOR_REVIEW.md`](READY_FOR_REVIEW.md), [`docs/GRANT_EVIDENCE.md`](docs/GRANT_EVIDENCE.md), and [`docs/BUDGET_AND_MILESTONES_FEDIVERSITY.md`](docs/BUDGET_AND_MILESTONES_FEDIVERSITY.md).
 
 Reviewer quick commands:
 
@@ -25,6 +27,21 @@ Windows demo:
 powershell -ExecutionPolicy Bypass -File .\scripts\demo-stack.ps1
 ```
 
+Expected demo success markers:
+
+```text
+ws.local_listening
+ws_server.listening addr=127.0.0.1:8787
+```
+
+Fediversity grant docs:
+
+- [`docs/FEDIVERSITY_REVIEWER_PATH.md`](docs/FEDIVERSITY_REVIEWER_PATH.md)
+- [`docs/FEDERATED_EVENT_SOURCING_ALIGNMENT.md`](docs/FEDERATED_EVENT_SOURCING_ALIGNMENT.md)
+- [`docs/ACTIVITYPUB_MATRIX_INTEGRATION_PLAN.md`](docs/ACTIVITYPUB_MATRIX_INTEGRATION_PLAN.md)
+- [`docs/BUDGET_AND_MILESTONES_FEDIVERSITY.md`](docs/BUDGET_AND_MILESTONES_FEDIVERSITY.md)
+- [`docs/GRANT_MILESTONE_TRACKER_FEDIVERSITY.md`](docs/GRANT_MILESTONE_TRACKER_FEDIVERSITY.md)
+
 Grant metadata:
 
 ```text
@@ -33,8 +50,8 @@ Fund: NGI Fediversity
 Requested amount: EUR 50,000
 Correct repository: https://github.com/safal207/LiminalDB
 ```
-```
 
+---
 
 ![Status](https://img.shields.io/badge/status-active-brightgreen)
 ![Core](https://img.shields.io/badge/core-rust-blue)
@@ -110,8 +127,8 @@ Core has zero I/O dependencies — adapters can be swapped or tested in isolatio
 ## Quick Start
 
 ```bash
-git clone https://github.com/safal207/LiminalBD.git
-cd LiminalBD
+git clone https://github.com/safal207/LiminalDB.git
+cd LiminalDB
 
 cargo build --release -p liminal-cli
 ./target/release/liminal-cli --store ./data --ws-port 8787
@@ -218,33 +235,3 @@ single-node benchmark sample with reproducible commands and explicit caveats.
 
 - **Adaptive monitoring** — alert thresholds that self-tune to workload
 - **IoT data ingestion** — burst-tolerant pipeline without manual provisioning
-- **Real-time recommendations** — pattern matching that specialises over time
-- **Autonomous control** — PID-regulated decision loops with full audit trail
-
-See [docs/USE_CASE_IOT_MONITORING.md](docs/USE_CASE_IOT_MONITORING.md) for a
-detailed IoT scenario with modelled comparisons vs Redis Streams and Kafka.
-
-## Documentation
-
-| Document | Content |
-|----------|---------|
-| [docs/ARCHITECTURE_ANALYSIS.md](docs/ARCHITECTURE_ANALYSIS.md) | Design decisions, module breakdown |
-| [liminal-db/docs/PROTOCOL.md](liminal-db/docs/PROTOCOL.md) | Client-server wire format |
-| [docs/ROADMAP.md](docs/ROADMAP.md) | Development roadmap |
-| [docs/PHILOSOPHY.md](docs/PHILOSOPHY.md) | Intellectual and philosophical roots |
-| [docs/adr/](docs/adr/) | Architecture Decision Records |
-| [CONTRIBUTING.md](CONTRIBUTING.md) | How to contribute |
-
-## Contributing
-
-We welcome contributions in any area — tests, docs, benchmarks, SDKs, or core
-features. See [CONTRIBUTING.md](CONTRIBUTING.md) for setup instructions and
-good first issues.
-
-## License
-
-[Apache-2.0](LICENSE) — free to use, modify, and distribute.
-
-## Contact
-
-safal0645@gmail.com
