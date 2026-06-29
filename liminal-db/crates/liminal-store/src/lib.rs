@@ -1,5 +1,6 @@
 mod checkpoint;
 mod codec;
+mod durability;
 mod gc;
 mod journal_impl;
 mod snapshot;
@@ -13,6 +14,7 @@ pub use checkpoint::{
     TrustedKeyRegistry, VerifiedCheckpointChain,
 };
 pub use codec::{decode_delta, encode_delta};
+pub use durability::DurabilityFailpoint;
 pub use gc::gc_compact;
 pub use journal_impl::{DiskJournal, SnapshotInfo, StoreStats};
 pub use snapshot::{create_snapshot, load_snapshot, ClusterFieldSeed};
