@@ -37,12 +37,12 @@ pub struct Store {
 impl Store {
     pub fn open<P: AsRef<Path>>(path: P) -> Result<Self> {
         let root = path.as_ref().to_path_buf();
-        create_dir_all(&root)?;
+        create_dir_all_durable(&root)?;
         let writer_lock = acquire_writer_lock(&root)?;
         let data_dir = root.join("data");
         let snap_dir = root.join("snap");
-        create_dir_all(&data_dir)?;
-        create_dir_all(&snap_dir)?;
+        create_dir_all_durable(&data_dir)?;
+        create_dir_all_durable(&snap_dir)?;
         let writer = WalWriter::open(&data_dir, DEFAULT_SEGMENT_SIZE)?;
         let manifest_path = root.join("manifest.cbor");
         Ok(Store {
@@ -113,6 +113,33 @@ impl Store {
     pub fn list_snapshots(&self) -> Result<Vec<u64>> {
         list_snapshots(&self.snap_dir)
     }
+}
+
+fn create_dir_all_durable(path: &Path) -> Result<()> {
+    let mut missing = Vec::new();
+    let mut current = path;
+    while !current.exists() {
+        missing.push(current.to_path_buf());
+        let Some(parent) = current.parent() else {
+            break;
+        };
+        if parent.as_os_str().is_empty() {
+            break;
+        }
+        current = parent;
+    }
+
+    create_dir_all(path)?;
+    for directory in missing.iter().rev() {
+        let parent = directory.parent().unwrap_or_else(|| Path::new("."));
+        let parent = if parent.as_os_str().is_empty() {
+            Path::new(".")
+        } else {
+            parent
+        };
+        sync_directory(parent)?;
+    }
+    Ok(())
 }
 
 fn acquire_writer_lock(root: &Path) -> Result<File> {
@@ -216,13 +243,17 @@ pub(crate) fn sync_directory(path: &Path) -> Result<()> {
 }
 
 #[cfg(windows)]
-pub(crate) fn sync_directory(_path: &Path) -> Result<()> {
-    Ok(())
+pub(crate) fn sync_directory(path: &Path) -> Result<()> {
+    Err(anyhow!(
+        "directory synchronization is unavailable on Windows for {path:?}"
+    ))
 }
 
 #[cfg(not(any(unix, windows)))]
-pub(crate) fn sync_directory(_path: &Path) -> Result<()> {
-    Ok(())
+pub(crate) fn sync_directory(path: &Path) -> Result<()> {
+    Err(anyhow!(
+        "directory synchronization is unsupported on this platform for {path:?}"
+    ))
 }
 
 pub(crate) fn list_segments(dir: &Path) -> Result<Vec<u64>> {
@@ -424,6 +455,25 @@ mod tests {
         let stream = store.stream_from(Offset::start()).expect("stream");
         let collected: Vec<Vec<u8>> = stream.map(|entry| entry.expect("entry")).collect();
         assert_eq!(collected, payloads);
+    }
+
+    #[test]
+    fn second_writer_is_rejected_until_first_is_dropped() {
+        let dir = tempdir().expect("tempdir");
+        let first = Store::open(dir.path()).expect("first writer");
+        assert!(Store::open(dir.path()).is_err(), "second writer must fail");
+        drop(first);
+        Store::open(dir.path()).expect("writer lock released on drop");
+    }
+
+    #[cfg(unix)]
+    #[test]
+    fn nested_store_directories_are_created_durably() {
+        let dir = tempdir().expect("tempdir");
+        let root = dir.path().join("nested/store/root");
+        Store::open(&root).expect("open nested store");
+        assert!(root.join("data").is_dir());
+        assert!(root.join("snap").is_dir());
     }
 
     #[test]
