@@ -16,11 +16,8 @@ jobs:
       - uses: actions/checkout@v4
         with:
           ref: feat/trustworthy-transition-ledger-v0.1
-          fetch-depth: 0
-
-      - uses: dtolnay/rust-toolchain@stable
-        with:
-          components: rustfmt
+          fetch-depth: 1
+          show-progress: false
 
       - name: Extract and apply guarded patch
         shell: bash
@@ -37,6 +34,10 @@ jobs:
           script = "\n".join(line[10:] if line.startswith("          ") else line for line in lines)
           exec(compile(script, 'pr89-review-fixes', 'exec'))
           PY
+
+      - uses: dtolnay/rust-toolchain@stable
+        with:
+          components: rustfmt
 
       - name: Format
         working-directory: liminal-db
