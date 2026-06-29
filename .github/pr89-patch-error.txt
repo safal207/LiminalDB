@@ -1,1 +1,6 @@
 patch=.github/pr89-patches/wal-lock-v2.patch
+checking file liminal-db/crates/liminal-store/src/wal.rs
+Hunk #1 FAILED at 6.
+Hunk #2 succeeded at 29 with fuzz 1 (offset -2 lines).
+Hunk #3 succeeded at 113 with fuzz 2 (offset -2 lines).
+1 out of 3 hunks FAILED
