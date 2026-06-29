@@ -146,6 +146,7 @@ fn main() -> Result<(), Box<dyn std::error::Error>> {
 
     println!("Recovered {} durable events", reopened.event_count());
     println!("Projection: {recovered:#?}");
+    drop(reopened);
 
     fs::remove_dir_all(root)?;
     Ok(())
