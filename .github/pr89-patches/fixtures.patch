@@ -48,7 +48,7 @@ diff --git a/liminal-db/crates/liminal-store/tests/trustworthy_transition_fixtur
  
      let mut ids = BTreeSet::new();
      for case in cases {
-@@ -51,6 +53,13 @@ fn trustworthy_transition_fixture_is_versioned_and_unambiguous() {
+@@ -51,5 +53,12 @@ fn trustworthy_transition_fixture_is_versioned_and_unambiguous() {
                  "case {case_id} uses an unknown stable error code: {error}"
              );
          }
