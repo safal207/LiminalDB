@@ -38,7 +38,7 @@ jobs:
             .github/pr89-patches/ledger-validation.patch
           )
           for patch_file in "${patches[@]}"; do
-            if ! patch --dry-run --batch --forward -p1 < "$patch_file" 2>/tmp/pr89-apply-error.txt; then
+            if ! patch --dry-run --batch --forward -p1 < "$patch_file" >/tmp/pr89-apply-error.txt 2>&1; then
               {
                 echo "patch=$patch_file"
                 cat /tmp/pr89-apply-error.txt
