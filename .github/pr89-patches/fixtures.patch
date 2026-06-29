@@ -1,0 +1,63 @@
+diff --git a/liminal-db/crates/liminal-store/Cargo.toml b/liminal-db/crates/liminal-store/Cargo.toml
+--- a/liminal-db/crates/liminal-store/Cargo.toml
++++ b/liminal-db/crates/liminal-store/Cargo.toml
+@@ -7,6 +7,7 @@ edition = "2021"
+ [dependencies]
+ anyhow = "1"
+ crc32fast = "1"
++fs2 = "0.4"
+ serde = { version = "1", features = ["derive"] }
+ serde_cbor = "0.11"
+ sha2 = "0.10"
+diff --git a/liminal-db/crates/liminal-store/tests/fixtures/trustworthy_transition_ledger_v0.1.json b/liminal-db/crates/liminal-store/tests/fixtures/trustworthy_transition_ledger_v0.1.json
+--- a/liminal-db/crates/liminal-store/tests/fixtures/trustworthy_transition_ledger_v0.1.json
++++ b/liminal-db/crates/liminal-store/tests/fixtures/trustworthy_transition_ledger_v0.1.json
+@@ -20,6 +20,11 @@
+       "mutation": "observation references another transition authorization",
+       "expected_error": "PARENT_MISMATCH"
+     },
++    {
++      "case_id": "missing_parent_reference",
++      "mutation": "observation references an authorization record that does not exist",
++      "expected_error": "MISSING_PARENT"
++    },
+     {
+       "case_id": "missing_observation_from_integrity_set",
+       "mutation": "response integrity omits a recorded observation",
+diff --git a/liminal-db/crates/liminal-store/tests/trustworthy_transition_fixture.rs b/liminal-db/crates/liminal-store/tests/trustworthy_transition_fixture.rs
+--- a/liminal-db/crates/liminal-store/tests/trustworthy_transition_fixture.rs
++++ b/liminal-db/crates/liminal-store/tests/trustworthy_transition_fixture.rs
+@@ -16,10 +16,11 @@ fn trustworthy_transition_fixture_is_versioned_and_unambiguous() {
+     );
+ 
+     let cases = fixture["cases"].as_array().expect("cases array");
+-    assert_eq!(cases.len(), 10);
++    assert_eq!(cases.len(), 11);
+ 
+     let expected_errors: BTreeSet<&str> = [
+         "PARENT_MISMATCH",
++        "MISSING_PARENT",
+         "OBSERVATION_SET_MISMATCH",
+         "DUPLICATE_RECORD_REFERENCE",
+         "SIDE_EFFECT_ROLLBACK",
+@@ -30,6 +31,7 @@ fn trustworthy_transition_fixture_is_versioned_and_unambiguous() {
+     ]
+     .into_iter()
+     .collect();
++    let expected_outcomes: BTreeSet<&str> = ["RECOVERED"].into_iter().collect();
+ 
+     let mut ids = BTreeSet::new();
+     for case in cases {
+@@ -51,6 +53,13 @@ fn trustworthy_transition_fixture_is_versioned_and_unambiguous() {
+                 "case {case_id} uses an unknown stable error code: {error}"
+             );
+         }
++        if let Some(expected) = case.get("expected") {
++            let expected = expected.as_str().expect("expected must be a string");
++            assert!(
++                expected_outcomes.contains(expected),
++                "case {case_id} uses an unknown expected outcome: {expected}"
++            );
++        }
+     }
+ }
