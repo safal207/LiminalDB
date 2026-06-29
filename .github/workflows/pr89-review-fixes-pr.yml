@@ -1,0 +1,62 @@
+name: PR89 review fixes trigger
+
+on:
+  pull_request:
+    branches:
+      - main
+
+permissions:
+  contents: write
+
+jobs:
+  apply-review-fixes:
+    if: github.head_ref == 'feat/trustworthy-transition-ledger-v0.1'
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+        with:
+          ref: feat/trustworthy-transition-ledger-v0.1
+          fetch-depth: 0
+
+      - uses: dtolnay/rust-toolchain@stable
+        with:
+          components: rustfmt
+
+      - name: Extract and apply guarded patch
+        shell: bash
+        run: |
+          python3 - <<'PY'
+          from pathlib import Path
+
+          workflow = Path('.github/workflows/pr89-review-fixes.yml').read_text()
+          marker = "          python3 - <<'PY'\n"
+          start = workflow.index(marker) + len(marker)
+          end = workflow.index("\n          PY\n", start)
+          script = workflow[start:end]
+          lines = script.splitlines()
+          script = "\n".join(line[10:] if line.startswith("          ") else line for line in lines)
+          exec(compile(script, 'pr89-review-fixes', 'exec'))
+          PY
+
+      - name: Format
+        working-directory: liminal-db
+        run: cargo fmt --all
+
+      - name: Check workspace
+        working-directory: liminal-db
+        run: cargo check --workspace
+
+      - name: Test liminal-store
+        working-directory: liminal-db
+        run: cargo test -q -p liminal-store --no-fail-fast
+
+      - name: Commit validated fixes
+        shell: bash
+        run: |
+          rm .github/workflows/pr89-review-fixes.yml
+          rm .github/workflows/pr89-review-fixes-pr.yml
+          git config user.name "github-actions[bot]"
+          git config user.email "41898282+github-actions[bot]@users.noreply.github.com"
+          git add -A
+          git commit -m "fix: address trustworthy ledger review findings"
+          git push origin HEAD:feat/trustworthy-transition-ledger-v0.1
