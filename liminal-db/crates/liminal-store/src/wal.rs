@@ -4,10 +4,14 @@ use std::path::{Path, PathBuf};
 
 use anyhow::{anyhow, Context, Result};
 use crc32fast::Hasher as Crc32;
+use fs2::FileExt;
 use serde::{Deserialize, Serialize};
 
+use crate::durability::{crash_if, DurabilityFailpoint};
+
 const WAL_EXTENSION: &str = "wal";
-const DEFAULT_SEGMENT_SIZE: u64 = 32 * 1024 * 1024; // 32 MiB
+const DEFAULT_SEGMENT_SIZE: u64 = 32 * 1024 * 1024;
+const WRITER_LOCK_FILE: &str = ".liminaldb-writer.lock";
 
 #[derive(Debug, Clone, Copy, PartialEq, Eq, PartialOrd, Ord)]
 pub struct Offset {
@@ -29,27 +33,41 @@ pub struct Store {
     snap_dir: PathBuf,
     writer: WalWriter,
     manifest_path: PathBuf,
+    _writer_lock: File,
 }
 
 impl Store {
     pub fn open<P: AsRef<Path>>(path: P) -> Result<Self> {
+        Self::open_with_rotation(path, DEFAULT_SEGMENT_SIZE)
+    }
+
+    pub fn open_with_rotation<P: AsRef<Path>>(path: P, rotation: u64) -> Result<Self> {
+        if rotation == 0 {
+            return Err(anyhow!("wal rotation size must be greater than zero"));
+        }
         let root = path.as_ref().to_path_buf();
+        create_dir_all(&root)?;
+        let writer_lock = acquire_writer_lock(&root)?;
         let data_dir = root.join("data");
         let snap_dir = root.join("snap");
         create_dir_all(&data_dir)?;
         create_dir_all(&snap_dir)?;
-        let writer = WalWriter::open(&data_dir, DEFAULT_SEGMENT_SIZE)?;
+        let writer = WalWriter::open(&data_dir, rotation)?;
         let manifest_path = root.join("manifest.cbor");
         Ok(Store {
             data_dir,
             snap_dir,
             writer,
             manifest_path,
+            _writer_lock: writer_lock,
         })
     }
 
     pub fn append(&mut self, bytes: &[u8]) -> Result<Offset> {
-        self.writer.append(bytes)
+        let offset = self.writer.append(bytes)?;
+        self.writer.sync_all()?;
+        crash_if(DurabilityFailpoint::AfterWalSyncBeforeReturn);
+        Ok(offset)
     }
 
     pub fn stream_from(&self, offset: Offset) -> Result<WalStream> {
@@ -109,6 +127,25 @@ impl Store {
     }
 }
 
+fn acquire_writer_lock(root: &Path) -> Result<File> {
+    let path = root.join(WRITER_LOCK_FILE);
+    let mut file = OpenOptions::new()
+        .create(true)
+        .read(true)
+        .write(true)
+        .open(&path)
+        .with_context(|| format!("failed to open writer lock {path:?}"))?;
+    file.try_lock_exclusive()
+        .with_context(|| format!("liminaldb writer lock is already held for {root:?}"))?;
+    file.set_len(0)?;
+    file.seek(SeekFrom::Start(0))?;
+    writeln!(file, "pid={}", std::process::id())?;
+    file.flush()?;
+    file.sync_all()?;
+    sync_directory(root)?;
+    Ok(file)
+}
+
 struct WalWriter {
     data_dir: PathBuf,
     rotation: u64,
@@ -128,7 +165,7 @@ impl WalWriter {
             .append(true)
             .read(true)
             .open(&file_path)
-            .with_context(|| format!("failed to open wal segment {:?}", file_path))?;
+            .with_context(|| format!("failed to open wal segment {file_path:?}"))?;
         let size = file.metadata()?.len();
         Ok(WalWriter {
             data_dir: data_dir.to_path_buf(),
@@ -152,27 +189,57 @@ impl WalWriter {
         let mut hasher = Crc32::new();
         hasher.update(payload);
         let checksum = hasher.finalize();
+
+        crash_if(DurabilityFailpoint::BeforeWalWrite);
         self.file.write_all(&len.to_le_bytes())?;
         self.file.write_all(payload)?;
         self.file.write_all(&checksum.to_le_bytes())?;
+        crash_if(DurabilityFailpoint::AfterWalWriteBeforeFlush);
         self.file.flush()?;
         self.size += record_size;
+        crash_if(DurabilityFailpoint::AfterWalFlushBeforeSync);
         Ok(offset)
     }
 
+    fn sync_all(&self) -> Result<()> {
+        self.file.sync_all()?;
+        Ok(())
+    }
+
     fn rotate(&mut self) -> Result<()> {
-        self.segment += 1;
-        self.size = 0;
-        let file_path = wal_path(&self.data_dir, self.segment);
-        self.file = OpenOptions::new()
+        let next_segment = self.segment + 1;
+        let file_path = wal_path(&self.data_dir, next_segment);
+        let file = OpenOptions::new()
             .create(true)
             .write(true)
             .read(true)
             .truncate(true)
             .open(&file_path)
-            .with_context(|| format!("failed to create wal segment {:?}", file_path))?;
+            .with_context(|| format!("failed to create wal segment {file_path:?}"))?;
+        file.sync_all()?;
+        crash_if(DurabilityFailpoint::WalSegmentRotation);
+        sync_directory(&self.data_dir)?;
+        self.segment = next_segment;
+        self.size = 0;
+        self.file = file;
         Ok(())
     }
+}
+
+#[cfg(unix)]
+pub(crate) fn sync_directory(path: &Path) -> Result<()> {
+    File::open(path)?.sync_all()?;
+    Ok(())
+}
+
+#[cfg(windows)]
+pub(crate) fn sync_directory(_path: &Path) -> Result<()> {
+    Ok(())
+}
+
+#[cfg(not(any(unix, windows)))]
+pub(crate) fn sync_directory(_path: &Path) -> Result<()> {
+    Ok(())
 }
 
 pub(crate) fn list_segments(dir: &Path) -> Result<Vec<u64>> {
@@ -204,7 +271,7 @@ pub(crate) fn list_segments(dir: &Path) -> Result<Vec<u64>> {
 }
 
 pub(crate) fn wal_path(base: &Path, segment: u64) -> PathBuf {
-    base.join(format!("{segment:08}.{}", WAL_EXTENSION))
+    base.join(format!("{segment:08}.{WAL_EXTENSION}"))
 }
 
 #[derive(Debug, Clone, Serialize, Deserialize, Default)]
@@ -279,7 +346,6 @@ impl WalStream {
             match OpenOptions::new().read(true).open(&path) {
                 Ok(mut file) => {
                     if self.offset.segment > segment {
-                        // Skip older segments
                         self.current_idx += 1;
                         continue;
                     }
@@ -383,7 +449,6 @@ mod tests {
         store.append(b"data").expect("append");
         drop(store);
 
-        // Corrupt the file by flipping a byte in payload
         let path = dir.path().join("data/00000001.wal");
         let mut file = std::fs::OpenOptions::new()
             .read(true)
@@ -400,9 +465,28 @@ mod tests {
 
         let store = Store::open(dir.path()).expect("reopen store");
         let mut stream = store.stream_from(Offset::start()).expect("stream");
-        assert!(
-            stream.next().unwrap().is_err(),
-            "corruption must be detected"
-        );
+        assert!(stream.next().unwrap().is_err(), "corruption must be detected");
+    }
+
+    #[test]
+    fn second_writer_for_same_root_is_rejected() {
+        let dir = tempdir().expect("tempdir");
+        let first = Store::open(dir.path()).expect("first writer");
+        let error = Store::open(dir.path()).expect_err("second writer must fail");
+        assert!(error.to_string().contains("writer lock"));
+        drop(first);
+        Store::open(dir.path()).expect("lock must be released after drop");
+    }
+
+    #[test]
+    fn small_rotation_preserves_all_records() {
+        let dir = tempdir().expect("tempdir");
+        let mut store = Store::open_with_rotation(dir.path(), 16).expect("open store");
+        store.append(b"first-record").expect("first");
+        store.append(b"second-record").expect("second");
+        assert!(store.current_segment() >= 3);
+        let stream = store.stream_from(Offset::start()).expect("stream");
+        let records: Vec<Vec<u8>> = stream.map(|entry| entry.expect("record")).collect();
+        assert_eq!(records, vec![b"first-record".to_vec(), b"second-record".to_vec()]);
     }
 }
