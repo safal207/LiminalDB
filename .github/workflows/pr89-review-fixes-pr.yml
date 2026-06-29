@@ -31,7 +31,8 @@ jobs:
         run: |
           patches=(
             .github/pr89-patches/fixtures.patch
-            .github/pr89-patches/wal-lock-v2.patch
+            .github/pr89-patches/wal-imports.patch
+            .github/pr89-patches/wal-lock-body.patch
             .github/pr89-patches/wal-create-sync.patch
             .github/pr89-patches/wal-rotation.patch
             .github/pr89-patches/wal-directory.patch
