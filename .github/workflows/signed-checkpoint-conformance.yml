@@ -1,0 +1,37 @@
+name: Signed Checkpoint Conformance
+
+on:
+  pull_request:
+    paths:
+      - "liminal-db/crates/liminal-store/src/checkpoint.rs"
+      - "liminal-db/crates/liminal-store/src/lib.rs"
+      - "liminal-db/crates/liminal-store/Cargo.toml"
+      - "liminal-db/crates/liminal-store/tests/fixtures/signed-checkpoint-*"
+      - "liminal-db/crates/liminal-store/examples/signed_checkpoint_*"
+      - "docs/integrations/SIGNED_CHECKPOINT_*"
+      - ".github/workflows/signed-checkpoint-conformance.yml"
+  workflow_dispatch:
+
+permissions:
+  contents: read
+
+jobs:
+  verify:
+    runs-on: ubuntu-latest
+    defaults:
+      run:
+        working-directory: liminal-db
+    steps:
+      - uses: actions/checkout@v4
+
+      - uses: dtolnay/rust-toolchain@stable
+
+      - uses: Swatinem/rust-cache@v2
+        with:
+          workspaces: liminal-db
+
+      - name: Check liminal-store
+        run: cargo check -p liminal-store
+
+      - name: Test signed checkpoint and ledger integration
+        run: cargo test -q -p liminal-store --no-fail-fast
