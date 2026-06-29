@@ -1,0 +1,19 @@
+diff --git a/liminal-db/crates/liminal-store/src/wal.rs b/liminal-db/crates/liminal-store/src/wal.rs
+--- a/liminal-db/crates/liminal-store/src/wal.rs
++++ b/liminal-db/crates/liminal-store/src/wal.rs
+@@ -124,12 +124,17 @@ impl WalWriter {
+         segments.sort_unstable();
+         let segment = segments.last().copied().unwrap_or(1);
+         let file_path = wal_path(data_dir, segment);
++        let created = !file_path.exists();
+         let file = OpenOptions::new()
+             .create(true)
+             .append(true)
+             .read(true)
+             .open(&file_path)
+             .with_context(|| format!("failed to open wal segment {:?}", file_path))?;
++        if created {
++            file.sync_all()?;
++            sync_directory(data_dir)?;
++        }
+         let size = file.metadata()?.len();
