@@ -63,9 +63,14 @@ fn prepare_snapshot_case(root: &Path) -> Result<(), Box<dyn std::error::Error>> 
     Ok(())
 }
 
-fn crash_append(root: &Path) -> Result<(), Box<dyn std::error::Error>> {
+fn append_observation(root: &Path) -> Result<(), Box<dyn std::error::Error>> {
     let mut ledger = TrustworthyTransitionLedger::open(root)?;
     ledger.append(observation())?;
+    Ok(())
+}
+
+fn crash_append(root: &Path) -> Result<(), Box<dyn std::error::Error>> {
+    append_observation(root)?;
     eprintln!("append unexpectedly returned without triggering failpoint");
     std::process::exit(87);
 }
@@ -88,10 +93,7 @@ fn crash_snapshot(root: &Path, failpoint: &str) -> Result<(), Box<dyn std::error
 fn inspect_ledger(root: &Path) -> Result<(), Box<dyn std::error::Error>> {
     let ledger = TrustworthyTransitionLedger::open(root)?;
     println!("EVENT_COUNT={}", ledger.event_count());
-    println!(
-        "HEAD={}",
-        ledger.head_event_hash().unwrap_or("NONE")
-    );
+    println!("HEAD={}", ledger.head_event_hash().unwrap_or("NONE"));
     Ok(())
 }
 
@@ -152,6 +154,7 @@ fn main() -> Result<(), Box<dyn std::error::Error>> {
     match command.as_str() {
         "prepare-ledger" => prepare_ledger(&root),
         "prepare-snapshot" => prepare_snapshot_case(&root),
+        "append" => append_observation(&root),
         "crash-append" => crash_append(&root),
         "crash-snapshot" => {
             let failpoint = args.get(3).ok_or("missing snapshot failpoint")?;
