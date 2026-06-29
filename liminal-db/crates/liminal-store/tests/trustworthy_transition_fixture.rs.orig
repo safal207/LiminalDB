@@ -14,11 +14,10 @@ fn trustworthy_transition_fixture_is_versioned_and_unambiguous() {
     );
 
     let cases = fixture["cases"].as_array().expect("cases array");
-    assert_eq!(cases.len(), 11);
+    assert_eq!(cases.len(), 10);
 
     let expected_errors: BTreeSet<&str> = [
         "PARENT_MISMATCH",
-        "MISSING_PARENT",
         "OBSERVATION_SET_MISMATCH",
         "DUPLICATE_RECORD_REFERENCE",
         "SIDE_EFFECT_ROLLBACK",
@@ -29,7 +28,6 @@ fn trustworthy_transition_fixture_is_versioned_and_unambiguous() {
     ]
     .into_iter()
     .collect();
-    let expected_outcomes: BTreeSet<&str> = ["RECOVERED"].into_iter().collect();
 
     let mut ids = BTreeSet::new();
     for case in cases {
@@ -50,13 +48,6 @@ fn trustworthy_transition_fixture_is_versioned_and_unambiguous() {
             assert!(
                 expected_errors.contains(error),
                 "case {case_id} uses an unknown stable error code: {error}"
-            );
-        }
-        if let Some(expected) = case.get("expected") {
-            let expected = expected.as_str().expect("expected must be a string");
-            assert!(
-                expected_outcomes.contains(expected),
-                "case {case_id} uses an unknown expected outcome: {expected}"
             );
         }
     }

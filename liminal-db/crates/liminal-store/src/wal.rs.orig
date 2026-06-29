@@ -209,22 +209,6 @@ impl WalWriter {
     }
 }
 
-#[cfg(unix)]
-pub(crate) fn sync_directory(path: &Path) -> Result<()> {
-    File::open(path)?.sync_all()?;
-    Ok(())
-}
-
-#[cfg(windows)]
-pub(crate) fn sync_directory(_path: &Path) -> Result<()> {
-    Ok(())
-}
-
-#[cfg(not(any(unix, windows)))]
-pub(crate) fn sync_directory(_path: &Path) -> Result<()> {
-    Ok(())
-}
-
 pub(crate) fn list_segments(dir: &Path) -> Result<Vec<u64>> {
     if !dir.exists() {
         return Ok(Vec::new());

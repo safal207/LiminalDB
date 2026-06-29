@@ -19,11 +19,6 @@
       "expected_error": "PARENT_MISMATCH"
     },
     {
-      "case_id": "missing_parent_reference",
-      "mutation": "observation references an authorization record that does not exist",
-      "expected_error": "MISSING_PARENT"
-    },
-    {
       "case_id": "missing_observation_from_integrity_set",
       "mutation": "response integrity omits a recorded observation",
       "expected_error": "OBSERVATION_SET_MISMATCH"

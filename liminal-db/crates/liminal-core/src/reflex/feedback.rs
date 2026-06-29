@@ -232,10 +232,7 @@ pub(crate) fn evaluate(window: &RingBuf<ReflexSnapshot>, cfg: &ReflexCfg) -> Ref
         return ReflexSignal::Ok;
     }
     let (front, back) = window.as_slices();
-    let samples: Vec<&ReflexSnapshot> = front
-        .iter()
-        .chain(back.iter())
-        .collect();
+    let samples: Vec<&ReflexSnapshot> = front.iter().chain(back.iter()).collect();
     if samples.len() < 2 {
         return ReflexSignal::Ok;
     }
@@ -259,7 +256,13 @@ pub(crate) fn evaluate(window: &RingBuf<ReflexSnapshot>, cfg: &ReflexCfg) -> Ref
     for pair in samples.windows(2) {
         if let [left, right] = pair {
             let grad = right.yield_rate - left.yield_rate;
-            let sign = if grad > hysteresis { 1 } else if grad < -hysteresis { -1 } else { 0 };
+            let sign = if grad > hysteresis {
+                1
+            } else if grad < -hysteresis {
+                -1
+            } else {
+                0
+            };
             if sign != 0 {
                 if last_sign != 0 && sign != last_sign {
                     sign_changes += 1;
@@ -347,7 +350,9 @@ pub fn apply_action(field: &mut ClusterField, now_ms: u64, action: &Action) {
         }
         Action::TargetShift { load_delta } => {
             let current = field.trs.target();
-            field.trs.set_target((current + load_delta).clamp(0.2, 0.95));
+            field
+                .trs
+                .set_target((current + load_delta).clamp(0.2, 0.95));
         }
     }
 }
