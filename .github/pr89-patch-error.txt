@@ -1,2 +1,2 @@
-patch=.github/pr89-patches/fixtures.patch
-error: corrupt patch at .github/pr89-patches/fixtures.patch:64
+patch=.github/pr89-patches/wal-lock.patch
+error: corrupt patch at .github/pr89-patches/wal-lock.patch:14
