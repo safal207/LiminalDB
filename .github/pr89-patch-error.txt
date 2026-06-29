@@ -1,3 +1,1 @@
 patch=.github/pr89-patches/wal-lock-v2.patch
-error: patch failed: liminal-db/crates/liminal-store/src/wal.rs:6
-error: liminal-db/crates/liminal-store/src/wal.rs: patch does not apply
