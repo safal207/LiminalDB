@@ -6,6 +6,7 @@ on:
       - "liminal-db/crates/liminal-store/src/checkpoint.rs"
       - "liminal-db/crates/liminal-store/src/lib.rs"
       - "liminal-db/crates/liminal-store/Cargo.toml"
+      - "liminal-db/crates/liminal-store/tests/checkpoint_ledger_integration.rs"
       - "liminal-db/crates/liminal-store/tests/fixtures/signed-checkpoint-*"
       - "liminal-db/crates/liminal-store/examples/signed_checkpoint_*"
       - "docs/integrations/SIGNED_CHECKPOINT_*"
