@@ -1,4 +1,3 @@
-patch=.github/pr89-patches/wal-rotation.patch
+patch=.github/pr89-patches/wal-directory.patch
 checking file liminal-db/crates/liminal-store/src/wal.rs
-patch: **** malformed patch at line 26:  
-
+patch: **** unexpected end of file in patch
