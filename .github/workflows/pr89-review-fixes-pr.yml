@@ -63,8 +63,22 @@ jobs:
         run: cargo fmt --all
 
       - name: Check workspace
-        working-directory: liminal-db
-        run: cargo check --workspace
+        shell: bash
+        run: |
+          set +e
+          (cd liminal-db && cargo check --workspace) >/tmp/pr89-cargo-check.txt 2>&1
+          status=$?
+          set -e
+          cat /tmp/pr89-cargo-check.txt
+          if [ "$status" -ne 0 ]; then
+            cp /tmp/pr89-cargo-check.txt .github/pr89-cargo-error.txt
+            git config user.name "github-actions[bot]"
+            git config user.email "41898282+github-actions[bot]@users.noreply.github.com"
+            git add .github/pr89-cargo-error.txt
+            git commit -m "ci: record PR 89 cargo failure"
+            git push origin HEAD:feat/trustworthy-transition-ledger-v0.1
+            exit "$status"
+          fi
 
       - name: Test liminal-store
         working-directory: liminal-db
@@ -75,6 +89,7 @@ jobs:
         run: |
           rm -rf .github/pr89-patches
           rm -f .github/pr89-patch-error.txt
+          rm -f .github/pr89-cargo-error.txt
           rm -f .github/workflows/pr89-review-fixes.yml
           rm -f .github/workflows/pr89-review-fixes-pr.yml
           git config user.name "github-actions[bot]"
