@@ -1,7 +1,7 @@
 diff --git a/liminal-db/crates/liminal-store/src/wal.rs b/liminal-db/crates/liminal-store/src/wal.rs
 --- a/liminal-db/crates/liminal-store/src/wal.rs
 +++ b/liminal-db/crates/liminal-store/src/wal.rs
-@@ -5,10 +5,12 @@ use std::path::{Path, PathBuf};
+@@ -6,7 +6,9 @@
  
  use anyhow::{anyhow, Context, Result};
  use crc32fast::Hasher as Crc32;
@@ -11,7 +11,7 @@ diff --git a/liminal-db/crates/liminal-store/src/wal.rs b/liminal-db/crates/limi
  const WAL_EXTENSION: &str = "wal";
  const DEFAULT_SEGMENT_SIZE: u64 = 32 * 1024 * 1024; // 32 MiB
 +const WRITER_LOCK_FILE: &str = ".liminaldb-writer.lock";
-@@ -30,22 +32,27 @@ pub struct Store {
+@@ -30,21 +32,25 @@ pub struct Store {
      snap_dir: PathBuf,
      writer: WalWriter,
      manifest_path: PathBuf,
@@ -37,7 +37,7 @@ diff --git a/liminal-db/crates/liminal-store/src/wal.rs b/liminal-db/crates/limi
 +            _writer_lock: writer_lock,
          })
      }
-@@ -110,6 +117,25 @@ impl Store {
+@@ -110,4 +117,23 @@ impl Store {
      }
  }
  
