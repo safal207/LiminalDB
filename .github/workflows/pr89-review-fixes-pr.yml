@@ -38,7 +38,18 @@ jobs:
             .github/pr89-patches/ledger-validation.patch
           )
           for patch in "${patches[@]}"; do
-            git apply --check "$patch"
+            if ! git apply --check "$patch" 2>/tmp/pr89-apply-error.txt; then
+              {
+                echo "patch=$patch"
+                cat /tmp/pr89-apply-error.txt
+              } > .github/pr89-patch-error.txt
+              git config user.name "github-actions[bot]"
+              git config user.email "41898282+github-actions[bot]@users.noreply.github.com"
+              git add .github/pr89-patch-error.txt
+              git commit -m "ci: record PR 89 apply failure"
+              git push origin HEAD:feat/trustworthy-transition-ledger-v0.1
+              exit 1
+            fi
             git apply "$patch"
           done
 
