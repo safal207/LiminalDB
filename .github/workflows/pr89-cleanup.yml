@@ -1,0 +1,62 @@
+name: PR89 cleanup
+
+on:
+  pull_request:
+    branches:
+      - main
+
+permissions:
+  contents: write
+
+jobs:
+  cleanup:
+    if: github.head_ref == 'feat/trustworthy-transition-ledger-v0.1'
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+        with:
+          ref: feat/trustworthy-transition-ledger-v0.1
+          fetch-depth: 0
+          show-progress: false
+
+      - uses: dtolnay/rust-toolchain@stable
+
+      - name: Remove patch artifacts and unrelated formatting
+        shell: bash
+        run: |
+          rm -f \
+            liminal-db/crates/liminal-store/Cargo.toml.orig \
+            liminal-db/crates/liminal-store/src/trustworthy_transition.rs.orig \
+            liminal-db/crates/liminal-store/src/wal.rs.orig \
+            liminal-db/crates/liminal-store/tests/fixtures/trustworthy_transition_ledger_v0.1.json.orig \
+            liminal-db/crates/liminal-store/tests/trustworthy_transition_fixture.rs.orig
+
+          git checkout 9c01ce3b6fab5ba4681efd30a590c055ae98fce8 -- \
+            liminal-db/Cargo.lock \
+            liminal-db/crates/liminal-bridge-net/src/peers.rs \
+            liminal-db/crates/liminal-core/src/lql.rs \
+            liminal-db/crates/liminal-core/src/reflex/feedback.rs \
+            liminal-db/crates/liminal-sensor/src/host.rs \
+            liminal-db/crates/liminal-store/examples/trustworthy_transition_ledger.rs \
+            liminal-db/crates/liminal-store/src/lib.rs
+
+          cd liminal-db
+          cargo update -p fs2 --precise 0.4.3
+
+      - name: Check workspace
+        working-directory: liminal-db
+        run: cargo check --workspace
+
+      - name: Test liminal-store
+        working-directory: liminal-db
+        run: cargo test -q -p liminal-store --no-fail-fast
+
+      - name: Commit clean patch
+        shell: bash
+        run: |
+          rm .github/workflows/pr89-cleanup.yml
+          git config user.name "github-actions[bot]"
+          git config user.email "41898282+github-actions[bot]@users.noreply.github.com"
+          git add -A
+          git commit -m "chore: clean PR 89 patch artifacts"
+          git push origin HEAD:feat/trustworthy-transition-ledger-v0.1
