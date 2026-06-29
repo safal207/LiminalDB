@@ -5,6 +5,7 @@ mod gc;
 mod journal_impl;
 mod snapshot;
 mod snapshot_durability;
+mod store_debug;
 mod trustworthy_transition;
 mod wal;
 
