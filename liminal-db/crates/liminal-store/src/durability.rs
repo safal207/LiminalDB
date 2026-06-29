@@ -49,6 +49,14 @@ impl fmt::Display for DurabilityFailpoint {
 }
 
 #[cfg(feature = "durability-failpoints")]
+pub fn trigger_durability_failpoint(point: DurabilityFailpoint) {
+    crash_if(point);
+}
+
+#[cfg(not(feature = "durability-failpoints"))]
+pub fn trigger_durability_failpoint(_point: DurabilityFailpoint) {}
+
+#[cfg(feature = "durability-failpoints")]
 pub(crate) fn crash_if(point: DurabilityFailpoint) {
     let selected = std::env::var("LIMINALDB_FAILPOINT").ok();
     if selected.as_deref() != Some(point.as_str()) {
