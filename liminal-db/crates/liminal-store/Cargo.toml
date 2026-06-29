@@ -8,6 +8,7 @@ anyhow = "1"
 crc32fast = "1"
 serde = { version = "1", features = ["derive"] }
 serde_cbor = "0.11"
+sha2 = "0.10"
 thiserror = "1"
 parking_lot = "0.12"
 liminal-core = { path = "../liminal-core" }
