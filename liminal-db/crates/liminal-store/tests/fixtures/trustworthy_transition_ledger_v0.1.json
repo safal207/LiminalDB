@@ -1,0 +1,62 @@
+{
+  "fixture_version": "0.1",
+  "profile": "org.liminaldb.trustworthy-transition-ledger.v0.1",
+  "cases": [
+    {
+      "case_id": "valid_full_chain_restart",
+      "events": [
+        "authorization",
+        "observation",
+        "response_integrity",
+        "causal_audit",
+        "continuity_snapshot"
+      ],
+      "expected": "RECOVERED"
+    },
+    {
+      "case_id": "cross_transition_parent_substitution",
+      "mutation": "observation references another transition authorization",
+      "expected_error": "PARENT_MISMATCH"
+    },
+    {
+      "case_id": "missing_observation_from_integrity_set",
+      "mutation": "response integrity omits a recorded observation",
+      "expected_error": "OBSERVATION_SET_MISMATCH"
+    },
+    {
+      "case_id": "duplicate_global_record_ref",
+      "mutation": "second transition reuses an existing record_ref",
+      "expected_error": "DUPLICATE_RECORD_REFERENCE"
+    },
+    {
+      "case_id": "side_effect_commitment_rollback",
+      "mutation": "later record changes side_effect_committed from true to false",
+      "expected_error": "SIDE_EFFECT_ROLLBACK"
+    },
+    {
+      "case_id": "execution_dimension_rollback",
+      "mutation": "later dimensions change OBSERVED_EXECUTED to NOT_OBSERVED",
+      "expected_error": "EXECUTION_ROLLBACK"
+    },
+    {
+      "case_id": "implicit_reauthorization",
+      "mutation": "new authorization does not supersede current authorization_ref",
+      "expected_error": "REAUTHORIZATION_WITHOUT_SUPERSESSION"
+    },
+    {
+      "case_id": "tampered_snapshot_digest",
+      "mutation": "snapshot body and snapshot_digest no longer match",
+      "expected_error": "SNAPSHOT_DIGEST_MISMATCH"
+    },
+    {
+      "case_id": "tampered_semantic_event_hash",
+      "mutation": "WAL CRC is valid but event_hash does not match event body",
+      "expected_error": "EVENT_HASH_MISMATCH"
+    },
+    {
+      "case_id": "snapshot_tail_equals_full_replay",
+      "mutation": "append an observation after snapshot and restart",
+      "expected": "RECOVERED"
+    }
+  ]
+}
