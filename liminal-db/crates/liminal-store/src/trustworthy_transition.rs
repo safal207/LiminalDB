@@ -879,30 +879,7 @@ fn digest_cbor<T: Serialize>(value: &T) -> Result<String, TransitionLedgerError>
 }
 
 fn atomic_write(path: &Path, bytes: &[u8]) -> Result<(), TransitionLedgerError> {
-    let parent = path
-        .parent()
-        .ok_or_else(|| TransitionLedgerError::Storage("snapshot path has no parent".into()))?;
-    fs::create_dir_all(parent).map_err(storage_error)?;
-    let temporary = parent.join(format!(
-        ".{}.{}.tmp",
-        SNAPSHOT_FILE,
-        std::process::id()
-    ));
-    {
-        let mut file = OpenOptions::new()
-            .create(true)
-            .truncate(true)
-            .write(true)
-            .open(&temporary)
-            .map_err(storage_error)?;
-        file.write_all(bytes).map_err(storage_error)?;
-        file.sync_all().map_err(storage_error)?;
-    }
-    fs::rename(&temporary, path).map_err(storage_error)?;
-    File::open(parent)
-        .and_then(|directory| directory.sync_all())
-        .map_err(storage_error)?;
-    Ok(())
+    crate::snapshot_durability::replace_snapshot_bytes_crash_safe(path, bytes)
 }
 
 fn sync_current_wal(store: &Store) -> Result<(), TransitionLedgerError> {
