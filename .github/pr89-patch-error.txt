@@ -1,3 +1,4 @@
-patch=.github/pr89-patches/wal-directory.patch
-checking file liminal-db/crates/liminal-store/src/wal.rs
-patch: **** unexpected end of file in patch
+patch=.github/pr89-patches/ledger-validation.patch
+checking file liminal-db/crates/liminal-store/src/trustworthy_transition.rs
+patch: **** malformed patch at line 50:  fn non_empty(value: String, label: &'static str) -> Result<String, TransitionLedgerError> {
+
