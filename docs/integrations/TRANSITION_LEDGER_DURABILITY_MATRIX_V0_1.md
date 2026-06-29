@@ -123,14 +123,17 @@ missing payload/CRC. Replay must reject it through WAL framing.
 
 ## Snapshot replacement API
 
-Repeated cross-platform snapshot replacement should use:
+All trustworthy-transition snapshot writes, including the original
+`TrustworthyTransitionLedger::write_snapshot` entry point, now route through the
+same recovery-aware replacement primitive. Callers that want the explicit
+cross-platform API may use:
 
 ```rust
 CrashSafeTransitionSnapshotExt::write_snapshot_crash_safe
 ```
 
 The v0.1 raw snapshot writer used direct rename semantics that differ between
-Unix and Windows when the destination already exists. The crash-safe extension
+Unix and Windows when the destination already exists. The production writer now
 uses explicit rollback ownership:
 
 ```text
