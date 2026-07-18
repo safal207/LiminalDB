@@ -1,0 +1,83 @@
+name: Lotus Memory Import Contract
+
+on:
+  workflow_dispatch:
+  push:
+    branches:
+      - agent/lotus-memory-import-contract-v0-1
+    paths:
+      - .github/workflows/lotus-memory-contract.yml
+      - scripts/validate_lotus_memory.py
+      - tests/test_validate_lotus_memory.py
+      - fixtures/lotus/valid-events.jsonl
+      - docs/integrations/LOTUS_MEMORY_IMPORT.md
+  pull_request:
+    branches:
+      - main
+    paths:
+      - .github/workflows/lotus-memory-contract.yml
+      - scripts/validate_lotus_memory.py
+      - tests/test_validate_lotus_memory.py
+      - fixtures/lotus/valid-events.jsonl
+      - docs/integrations/LOTUS_MEMORY_IMPORT.md
+
+permissions:
+  contents: read
+
+concurrency:
+  group: lotus-memory-import-${{ github.ref }}
+  cancel-in-progress: true
+
+jobs:
+  verify:
+    name: Verify offline Lotus AuditEvent import contract
+    runs-on: ubuntu-latest
+    timeout-minutes: 10
+    steps:
+      - name: Checkout exact workflow revision
+        uses: actions/checkout@v4
+
+      - name: Validate Python sources
+        run: |
+          set -euo pipefail
+          python3 --version
+          python3 -m py_compile \
+            scripts/validate_lotus_memory.py \
+            tests/test_validate_lotus_memory.py
+
+      - name: Run contract regression tests
+        run: |
+          set -euo pipefail
+          python3 -m unittest tests/test_validate_lotus_memory.py -v
+
+      - name: Validate fixture in dry-run mode
+        run: |
+          set -euo pipefail
+          mkdir -p reports/lotus
+          python3 scripts/validate_lotus_memory.py \
+            --events fixtures/lotus/valid-events.jsonl \
+            --output reports/lotus/import-check.json
+          python3 - <<'PY'
+          import json
+          from pathlib import Path
+          value = json.loads(Path("reports/lotus/import-check.json").read_text())
+          assert value["schema_version"] == "liminaldb-lotus-import-check-v0.1"
+          assert value["mode"] == "dry_run"
+          assert value["write_performed"] is False
+          assert value["event_count"] == 2
+          assert value["canonical_finding_count"] == 2
+          assert value["authority"]["durable_memory_accepted"] is False
+          assert value["authority"]["live_ingestion_performed"] is False
+          PY
+          sha256sum \
+            fixtures/lotus/valid-events.jsonl \
+            reports/lotus/import-check.json \
+            > reports/lotus/SHA256SUMS.txt
+
+      - name: Upload exact contract evidence
+        uses: actions/upload-artifact@v4
+        with:
+          name: lotus-memory-import-contract-${{ github.run_id }}
+          path: reports/lotus/
+          if-no-files-found: error
+          retention-days: 14
