@@ -1,0 +1,80 @@
+name: Pythia Verified-Negative Memory Contract
+
+on:
+  pull_request:
+    paths:
+      - .github/workflows/pythia-negative-memory-contract.yml
+      - scripts/validate_pythia_negative_memory.py
+      - tests/test_validate_pythia_negative_memory.py
+  workflow_dispatch:
+
+permissions:
+  contents: read
+
+concurrency:
+  group: pythia-negative-memory-${{ github.ref }}
+  cancel-in-progress: true
+
+jobs:
+  verify:
+    runs-on: ubuntu-latest
+    timeout-minutes: 10
+    steps:
+      - uses: actions/checkout@v4
+        with:
+          persist-credentials: false
+
+      - name: Run old and new import contract tests
+        shell: bash
+        run: |
+          set -euo pipefail
+          python3 -m py_compile \
+            scripts/validate_lotus_memory.py \
+            scripts/validate_pythia_negative_memory.py \
+            tests/test_validate_lotus_memory.py \
+            tests/test_validate_pythia_negative_memory.py
+          python3 -m unittest \
+            tests/test_validate_lotus_memory.py \
+            tests/test_validate_pythia_negative_memory.py \
+            -v 2>&1 | tee contract-tests.log
+
+      - name: Emit deterministic dry-run import report
+        shell: bash
+        run: |
+          set -euo pipefail
+          mkdir -p reports
+          python3 - <<'PY'
+          import importlib.util
+          import json
+          from pathlib import Path
+
+          def load(name, path):
+              spec = importlib.util.spec_from_file_location(name, path)
+              module = importlib.util.module_from_spec(spec)
+              assert spec and spec.loader
+              spec.loader.exec_module(module)
+              return module
+
+          validator = load('validator', Path('scripts/validate_pythia_negative_memory.py'))
+          fixtures = load('fixtures', Path('tests/test_validate_pythia_negative_memory.py'))
+          event = fixtures.valid_event()
+          Path('reports/pythia-negative-memory.jsonl').write_text(json.dumps(event, sort_keys=True) + '\n')
+          summary = validator.build_summary(validator.load_events(Path('reports/pythia-negative-memory.jsonl')))
+          Path('reports/liminaldb-pythia-negative-import-check.json').write_text(json.dumps(summary, indent=2, sort_keys=True) + '\n')
+          PY
+          jq -e '
+            .mode == "dry_run" and
+            .write_performed == false and
+            .verified_negative_count == 1 and
+            .authority.durable_memory_accepted == false and
+            .authority.live_ingestion_performed == false and
+            .authority.external_submission_authorized == false
+          ' reports/liminaldb-pythia-negative-import-check.json >/dev/null
+          sha256sum reports/* contract-tests.log > reports/SHA256SUMS.txt
+
+      - uses: actions/upload-artifact@v4
+        with:
+          name: liminaldb-pythia-negative-${{ github.run_id }}
+          path: reports/
+          if-no-files-found: error
+          retention-days: 14
