@@ -253,11 +253,21 @@ It does not prove:
 
 The original independent transition verdicts remain unchanged.
 
-## Merge order
+## Merge order and review-quota fallback
 
 1. PR #89 is merged;
 2. this checkpoint PR is retargeted to `main`;
 3. checkpoint conformance, workspace CI, Security Baseline, and the inherited
-   cross-platform ledger matrix must pass on one exact head;
-4. CodeRabbit and mandatory human/Codex review must complete on that exact head;
-5. only then may this profile merge.
+   cross-platform ledger matrix pass on one exact head;
+4. the preferred independent lane is a CodeRabbit review on that exact head;
+5. when CodeRabbit returns an authenticated quota or rate-limit signal instead
+   of a review, that external lane is recorded as `WAIVED_QUOTA`, never as a
+   successful independent review;
+6. the unchanged exact head is then reviewed by a role-separated GPT panel for
+   temporal trust, cryptography and key lifecycle, causal anti-rollback,
+   adversarial semantics, and CI/scope consistency;
+7. the panel is explicitly one model operating under independent role contracts;
+   it is advisory and cannot approve, execute, or merge;
+8. any P0-P2 role finding requires a fix and a complete exact-head rerun;
+9. merge requires no unresolved review threads, a clean role-panel verdict,
+   green exact-head gates, and an explicit maintainer/human D6 decision.
