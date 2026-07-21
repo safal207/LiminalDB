@@ -1,0 +1,63 @@
+name: PR92 Snapshot Binding Fix
+
+on:
+  push:
+    branches:
+      - feat/checkpoint-anchors-v0-1
+    paths:
+      - '.github/scripts/apply_pr92_snapshot_binding.py'
+      - '.github/workflows/pr92-snapshot-binding-fix.yml'
+
+permissions:
+  contents: write
+
+concurrency:
+  group: pr92-snapshot-binding-fix
+  cancel-in-progress: false
+
+jobs:
+  apply-validate-push:
+    runs-on: ubuntu-latest
+    steps:
+      - name: Checkout exact branch head
+        uses: actions/checkout@v4
+        with:
+          ref: feat/checkpoint-anchors-v0-1
+          fetch-depth: 0
+          persist-credentials: false
+
+      - name: Apply guarded snapshot binding fix
+        run: |
+          set -euo pipefail
+          python3 .github/scripts/apply_pr92_snapshot_binding.py
+          cargo fmt --manifest-path liminal-db/Cargo.toml --all
+
+      - name: Validate checkpoint binding and regressions
+        working-directory: liminal-db
+        run: |
+          set -euo pipefail
+          cargo check -p liminal-store
+          cargo test -p liminal-store --test checkpoint_ledger_integration
+          cargo test -p liminal-store checkpoint
+          cargo test -p liminal-store trustworthy_transition
+
+      - name: Remove temporary patch machinery
+        run: |
+          rm .github/scripts/apply_pr92_snapshot_binding.py
+          rm .github/workflows/pr92-snapshot-binding-fix.yml
+
+      - name: Commit and push validated fix
+        env:
+          GH_TOKEN: ${{ github.token }}
+        run: |
+          set -euo pipefail
+          git config user.name "github-actions[bot]"
+          git config user.email "41898282+github-actions[bot]@users.noreply.github.com"
+          git add liminal-db/crates/liminal-store/src/trustworthy_transition.rs
+          git add liminal-db/crates/liminal-store/src/checkpoint.rs
+          git add liminal-db/crates/liminal-store/tests/checkpoint_ledger_integration.rs
+          git add .github/scripts/apply_pr92_snapshot_binding.py
+          git add .github/workflows/pr92-snapshot-binding-fix.yml
+          git commit -m "fix: bind checkpoint material to exact snapshot state"
+          git remote set-url origin "https://x-access-token:${GH_TOKEN}@github.com/${GITHUB_REPOSITORY}.git"
+          git push origin HEAD:feat/checkpoint-anchors-v0-1
