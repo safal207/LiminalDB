@@ -34,14 +34,73 @@ jobs:
           python3 .github/scripts/apply_pr92_snapshot_binding.py
           cargo fmt --manifest-path liminal-db/Cargo.toml --all
 
-      - name: Validate checkpoint binding and regressions
+      - name: Check liminal-store
+        id: check
+        continue-on-error: true
         working-directory: liminal-db
         run: |
-          set -euo pipefail
-          cargo check -p liminal-store
-          cargo test -p liminal-store --test checkpoint_ledger_integration
-          cargo test -p liminal-store checkpoint
-          cargo test -p liminal-store trustworthy_transition
+          set +e
+          cargo check -p liminal-store > ../pr92-cargo-check.log 2>&1
+          status=$?
+          echo "status=$status" >> "$GITHUB_OUTPUT"
+          tail -n 200 ../pr92-cargo-check.log
+          exit "$status"
+
+      - name: Test checkpoint ledger integration
+        id: integration
+        if: ${{ steps.check.outputs.status == '0' }}
+        continue-on-error: true
+        working-directory: liminal-db
+        run: |
+          set +e
+          cargo test -p liminal-store --test checkpoint_ledger_integration > ../pr92-integration.log 2>&1
+          status=$?
+          echo "status=$status" >> "$GITHUB_OUTPUT"
+          tail -n 200 ../pr92-integration.log
+          exit "$status"
+
+      - name: Test checkpoint module
+        id: checkpoint
+        if: ${{ steps.check.outputs.status == '0' && steps.integration.outputs.status == '0' }}
+        continue-on-error: true
+        working-directory: liminal-db
+        run: |
+          set +e
+          cargo test -p liminal-store checkpoint > ../pr92-checkpoint.log 2>&1
+          status=$?
+          echo "status=$status" >> "$GITHUB_OUTPUT"
+          tail -n 200 ../pr92-checkpoint.log
+          exit "$status"
+
+      - name: Test trustworthy transition regressions
+        id: transition
+        if: ${{ steps.check.outputs.status == '0' && steps.integration.outputs.status == '0' && steps.checkpoint.outputs.status == '0' }}
+        continue-on-error: true
+        working-directory: liminal-db
+        run: |
+          set +e
+          cargo test -p liminal-store trustworthy_transition > ../pr92-transition.log 2>&1
+          status=$?
+          echo "status=$status" >> "$GITHUB_OUTPUT"
+          tail -n 200 ../pr92-transition.log
+          exit "$status"
+
+      - name: Upload validation diagnostics
+        if: ${{ always() }}
+        uses: actions/upload-artifact@v4
+        with:
+          name: pr92-snapshot-binding-diagnostics-${{ github.run_id }}
+          path: |
+            pr92-cargo-check.log
+            pr92-integration.log
+            pr92-checkpoint.log
+            pr92-transition.log
+          if-no-files-found: warn
+          retention-days: 7
+
+      - name: Stop on validation failure
+        if: ${{ steps.check.outputs.status != '0' || steps.integration.outputs.status != '0' || steps.checkpoint.outputs.status != '0' || steps.transition.outputs.status != '0' }}
+        run: exit 1
 
       - name: Remove temporary patch machinery
         run: |
