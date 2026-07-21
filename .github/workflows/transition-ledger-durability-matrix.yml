@@ -1,197 +1,50 @@
-name: PR93 Main Reconcile Bootstrap
+name: Transition Ledger Durability Matrix
 
 on:
   pull_request:
-    branches: [main]
     paths:
+      - "liminal-db/crates/liminal-store/src/durability.rs"
+      - "liminal-db/crates/liminal-store/src/snapshot_durability.rs"
+      - "liminal-db/crates/liminal-store/src/wal.rs"
+      - "liminal-db/crates/liminal-store/src/lib.rs"
+      - "liminal-db/crates/liminal-store/Cargo.toml"
+      - "liminal-db/crates/liminal-store/examples/durability_crash_harness.rs"
+      - "tools/run_transition_durability_matrix.py"
+      - "docs/integrations/TRANSITION_LEDGER_DURABILITY_MATRIX_V0_1.md"
       - ".github/workflows/transition-ledger-durability-matrix.yml"
   workflow_dispatch:
 
 permissions:
-  contents: write
-
-concurrency:
-  group: pr93-main-reconcile-${{ github.event.pull_request.number }}
-  cancel-in-progress: false
+  contents: read
 
 jobs:
-  reconcile-validate-push:
-    if: ${{ github.head_ref == 'feat/durability-matrix-v0-1' }}
-    runs-on: ubuntu-latest
+  durability:
+    strategy:
+      fail-fast: false
+      matrix:
+        os: [ubuntu-latest, windows-latest, macos-latest]
+    runs-on: ${{ matrix.os }}
     steps:
-      - name: Checkout exact PR branch
-        uses: actions/checkout@v4
+      - uses: actions/checkout@v4
+
+      - uses: dtolnay/rust-toolchain@stable
+
+      - uses: Swatinem/rust-cache@v2
         with:
-          ref: feat/durability-matrix-v0-1
-          fetch-depth: 0
-          persist-credentials: false
+          workspaces: liminal-db
 
-      - name: Fetch archived pre-reconcile head
-        run: |
-          set -euo pipefail
-          git fetch origin archive/pr93-pre-main-reconcile-20260721
+      - name: Test durability APIs
+        working-directory: liminal-db
+        run: cargo test -q -p liminal-store --features durability-failpoints --no-fail-fast
 
-      - name: Restore additive durability files
-        run: |
-          set -euo pipefail
-          archive=origin/archive/pr93-pre-main-reconcile-20260721
-          git checkout "$archive" -- \
-            .github/workflows/transition-ledger-durability-matrix.yml \
-            docs/integrations/TRANSITION_LEDGER_DURABILITY_MATRIX_V0_1.md \
-            liminal-db/crates/liminal-store/examples/durability_crash_harness.rs \
-            liminal-db/crates/liminal-store/src/durability.rs \
-            liminal-db/crates/liminal-store/src/snapshot_durability.rs \
-            liminal-db/crates/liminal-store/src/store_debug.rs \
-            tools/run_transition_durability_matrix.py
+      - name: Run process-crash durability matrix
+        run: >-
+          python tools/run_transition_durability_matrix.py
+          --output artifacts/transition-ledger-durability-${{ matrix.os }}.json
 
-      - name: Apply and resolve modified-file durability delta
-        run: |
-          set -euo pipefail
-          archive=origin/archive/pr93-pre-main-reconcile-20260721
-          base=2cac499c3b73c19d566ac763bf32816f4a4bcadc
-          git diff --binary "$base" "$archive" -- \
-            liminal-db/crates/liminal-store/Cargo.toml \
-            liminal-db/crates/liminal-store/src/lib.rs \
-            liminal-db/crates/liminal-store/src/trustworthy_transition.rs \
-            liminal-db/crates/liminal-store/src/wal.rs \
-            > /tmp/pr93-modified.patch
-          set +e
-          git apply --3way --index /tmp/pr93-modified.patch
-          status=$?
-          set -e
-          if [[ "$status" -ne 0 ]]; then
-            python3 - <<'PY'
-          from pathlib import Path
-
-          def resolve(path, builders):
-              text = Path(path).read_text()
-              output, cursor, index = [], 0, 0
-              while True:
-                  start = text.find('<<<<<<< ours\n', cursor)
-                  if start < 0:
-                      output.append(text[cursor:])
-                      break
-                  output.append(text[cursor:start])
-                  middle = text.find('=======\n', start)
-                  end = text.find('>>>>>>> theirs\n', middle)
-                  if middle < 0 or end < 0 or index >= len(builders):
-                      raise SystemExit(f'malformed or unexpected conflict in {path}')
-                  ours = text[start + len('<<<<<<< ours\n'):middle]
-                  theirs = text[middle + len('=======\n'):end]
-                  output.append(builders[index](ours, theirs))
-                  index += 1
-                  cursor = end + len('>>>>>>> theirs\n')
-              if index != len(builders):
-                  raise SystemExit(f'expected {len(builders)} conflicts in {path}, found {index}')
-              Path(path).write_text(''.join(output))
-
-          keep_ours = lambda ours, theirs: ours
-          keep_theirs = lambda ours, theirs: theirs
-          resolve('liminal-db/crates/liminal-store/Cargo.toml', [
-              lambda ours, theirs: 'default = []\ndurability-failpoints = []\ndurability-test-hooks = []\n',
-              keep_ours,
-          ])
-          resolve('liminal-db/crates/liminal-store/src/trustworthy_transition.rs', [keep_theirs])
-
-          def wal_header(ours, theirs):
-              return ('use crate::durability::{crash_if, DurabilityFailpoint};\n\n'
-                      'const WAL_EXTENSION: &str = "wal";\n'
-                      'const DEFAULT_SEGMENT_SIZE: u64 = 32 * 1024 * 1024; // 32 MiB\n'
-                      'const WRITER_LOCK_FILE: &str = ".liminaldb-writer.lock";\n\n'
-                      + ours[ours.index('#[derive'):])
-
-          def wal_open(ours, theirs):
-              return ('        create_dir_all_durable(&root)?;\n'
-                      '        let writer_lock = acquire_writer_lock(&root)?;\n'
-                      '        let data_dir = root.join("data");\n'
-                      '        let snap_dir = root.join("snap");\n'
-                      '        create_dir_all_durable(&data_dir)?;\n'
-                      '        create_dir_all_durable(&snap_dir)?;\n'
-                      '        let writer = WalWriter::open(&data_dir, rotation)?;\n')
-
-          def wal_append(ours, theirs):
-              return ours.rstrip() + '\n\n        crash_if(DurabilityFailpoint::AfterWalSyncBeforeReturn);\n'
-
-          def wal_writer_open(ours, theirs):
-              return ours.replace('format!("failed to open wal segment {:?}", file_path)',
-                                  'format!("failed to open wal segment {file_path:?}")')
-
-          def wal_rotate_create(ours, theirs):
-              merged = ours.replace('format!("failed to create wal segment {:?}", file_path)',
-                                    'format!("failed to create wal segment {file_path:?}")')
-              return merged.rstrip() + '\n        crash_if(DurabilityFailpoint::WalSegmentRotation);\n'
-
-          def wal_tests(ours, theirs):
-              marker = '    }\n\n    #[test]\n    fn second_writer_for_same_root_is_rejected()'
-              tail = theirs.find(marker)
-              if tail < 0:
-                  raise SystemExit('missing durability test tail')
-              return ours.rstrip() + '\n' + theirs[tail:]
-
-          resolve('liminal-db/crates/liminal-store/src/wal.rs', [
-              wal_header, wal_open, wal_append, keep_ours, wal_writer_open,
-              keep_ours, wal_rotate_create, keep_ours, keep_ours, keep_ours, wal_tests,
-          ])
-          PY
-            git add \
-              liminal-db/crates/liminal-store/Cargo.toml \
-              liminal-db/crates/liminal-store/src/trustworthy_transition.rs \
-              liminal-db/crates/liminal-store/src/wal.rs
-          fi
-          if git grep -n -E '^(<<<<<<<|=======|>>>>>>>)' -- \
-            liminal-db/crates/liminal-store/Cargo.toml \
-            liminal-db/crates/liminal-store/src/trustworthy_transition.rs \
-            liminal-db/crates/liminal-store/src/wal.rs; then
-            exit 1
-          fi
-          test -z "$(git diff --name-only --diff-filter=U)"
-          git diff --check
-
-      - name: Validate reconciled durability contract
-        id: validate
-        run: |
-          mkdir -p artifacts
-          set +e
-          {
-            set -x
-            cargo fmt --manifest-path liminal-db/Cargo.toml --all
-            git diff --check
-            cd liminal-db
-            cargo check --locked -p liminal-store --features durability-failpoints
-            cargo test -q --locked -p liminal-store --features durability-failpoints --no-fail-fast
-            cd ..
-            python tools/run_transition_durability_matrix.py \
-              --output artifacts/transition-ledger-durability-bootstrap.json
-          } > artifacts/pr93-bootstrap-validation.log 2>&1
-          status=$?
-          set -e
-          echo "status=$status" >> "$GITHUB_OUTPUT"
-          tail -n 250 artifacts/pr93-bootstrap-validation.log
-          exit 0
-
-      - name: Upload validation failure
-        if: ${{ steps.validate.outputs.status != '0' }}
+      - name: Upload durability evidence
         uses: actions/upload-artifact@v4
         with:
-          name: pr93-bootstrap-validation-${{ github.run_id }}
-          path: artifacts/pr93-bootstrap-validation.log
+          name: transition-ledger-durability-${{ matrix.os }}
+          path: artifacts/transition-ledger-durability-${{ matrix.os }}.json
           if-no-files-found: error
-          retention-days: 7
-
-      - name: Stop on validation failure
-        if: ${{ steps.validate.outputs.status != '0' }}
-        run: exit 1
-
-      - name: Commit validated reconciliation
-        if: ${{ steps.validate.outputs.status == '0' }}
-        env:
-          GH_TOKEN: ${{ github.token }}
-        run: |
-          set -euo pipefail
-          rm -rf artifacts
-          git config user.name "github-actions[bot]"
-          git config user.email "41898282+github-actions[bot]@users.noreply.github.com"
-          git add -A
-          git commit -m "reconcile: rebase durability matrix onto merged checkpoint main"
-          git remote set-url origin "https://x-access-token:${GH_TOKEN}@github.com/${GITHUB_REPOSITORY}.git"
-          git push origin HEAD:feat/durability-matrix-v0-1
