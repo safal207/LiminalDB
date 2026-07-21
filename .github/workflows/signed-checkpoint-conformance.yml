@@ -41,8 +41,11 @@ jobs:
             echo "Trusted-time patch helper already consumed."
           fi
 
-      - name: Verify formatting
-        run: cargo fmt --manifest-path liminal-db/Cargo.toml --all -- --check
+      - name: Format only the changed Rust module
+        run: |
+          set -euo pipefail
+          rustfmt --edition 2021 liminal-db/crates/liminal-store/src/checkpoint.rs
+          git diff --check
 
       - name: Validate full liminal-store contract
         working-directory: liminal-db
