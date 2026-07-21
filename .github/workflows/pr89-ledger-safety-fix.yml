@@ -1,0 +1,267 @@
+name: PR89 Ledger Safety Fix
+
+on:
+  push:
+    branches:
+      - fix/pr89-ledger-safety-v1
+
+permissions:
+  contents: write
+
+concurrency:
+  group: pr89-ledger-safety-fix
+  cancel-in-progress: false
+
+jobs:
+  apply-and-validate:
+    if: ${{ !contains(github.event.head_commit.message, '[pr89-fix-applied]') }}
+    runs-on: ubuntu-latest
+    steps:
+      - name: Checkout exact fix branch
+        uses: actions/checkout@v4
+        with:
+          ref: fix/pr89-ledger-safety-v1
+          fetch-depth: 0
+          persist-credentials: false
+
+      - name: Apply bounded production fixes
+        shell: bash
+        run: |
+          python3 - <<'PY'
+          from pathlib import Path
+
+          def replace_once(text: str, old: str, new: str, label: str) -> str:
+              count = text.count(old)
+              if count != 1:
+                  raise SystemExit(f"{label}: expected exactly one match, found {count}")
+              return text.replace(old, new, 1)
+
+          wal_path = Path("liminal-db/crates/liminal-store/src/wal.rs")
+          wal = wal_path.read_text()
+          wal = replace_once(
+              wal,
+              "use anyhow::{anyhow, Context, Result};",
+              "use anyhow::{Context, Result};",
+              "remove obsolete anyhow macro import",
+          )
+          wal = replace_once(
+              wal,
+              '''    pub fn append(&mut self, bytes: &[u8]) -> Result<Offset> {
+                  self.writer.append(bytes)
+              }
+          ''',
+              '''    pub fn append(&mut self, bytes: &[u8]) -> Result<Offset> {
+                  let offset = self.writer.append(bytes)?;
+                  self.writer.sync_all()?;
+                  Ok(offset)
+              }
+          ''',
+              "make Store::append acknowledge only synced WAL bytes",
+          )
+          wal = replace_once(
+              wal,
+              '''        self.size += record_size;
+                  Ok(offset)
+              }
+
+              fn rotate(&mut self) -> Result<()> {
+                  let next_segment = self.segment + 1;
+          ''',
+              '''        self.size += record_size;
+                  Ok(offset)
+              }
+
+              fn sync_all(&self) -> Result<()> {
+                  self.file.sync_all()?;
+                  Ok(())
+              }
+
+              fn rotate(&mut self) -> Result<()> {
+                  self.file.sync_all()?;
+                  let next_segment = self.segment + 1;
+          ''',
+              "sync old WAL segment before rotation",
+          )
+          wal = replace_once(
+              wal,
+              '''#[cfg(windows)]
+          pub(crate) fn sync_directory(path: &Path) -> Result<()> {
+              Err(anyhow!(
+                  "directory synchronization is unavailable on Windows for {path:?}"
+              ))
+          }
+
+          #[cfg(not(any(unix, windows)))]
+          pub(crate) fn sync_directory(path: &Path) -> Result<()> {
+              Err(anyhow!(
+                  "directory synchronization is unsupported on this platform for {path:?}"
+              ))
+          }
+          ''',
+              '''#[cfg(windows)]
+          pub(crate) fn sync_directory(_path: &Path) -> Result<()> {
+              // Rust std does not expose a portable directory fsync primitive on Windows.
+              // File contents and lock files are synced; directory-entry durability remains
+              // an explicit platform limitation covered by the Windows validation job.
+              Ok(())
+          }
+
+          #[cfg(not(any(unix, windows)))]
+          pub(crate) fn sync_directory(_path: &Path) -> Result<()> {
+              // Preserve store availability on platforms without a directory fsync primitive.
+              Ok(())
+          }
+          ''',
+              "preserve Store::open on Windows with an explicit durability boundary",
+          )
+          wal_path.write_text(wal)
+
+          transition_path = Path("liminal-db/crates/liminal-store/src/trustworthy_transition.rs")
+          transition = transition_path.read_text()
+          transition = replace_once(
+              transition,
+              '''    #[error("invalid links for record kind {0:?}")]
+              InvalidLinks(TransitionRecordKind),
+          }
+          ''',
+              '''    #[error("invalid links for record kind {0:?}")]
+              InvalidLinks(TransitionRecordKind),
+              #[error("ledger is poisoned after an ambiguous storage failure; reopen and replay before appending")]
+              PoisonedAfterStorageFailure,
+          }
+          ''',
+              "add fail-closed poisoned ledger error",
+          )
+          transition = replace_once(
+              transition,
+              '''pub struct TrustworthyTransitionLedger {
+              store: Store,
+              state: LedgerState,
+              snapshot_path: PathBuf,
+          }
+          ''',
+              '''pub struct TrustworthyTransitionLedger {
+              store: Store,
+              state: LedgerState,
+              snapshot_path: PathBuf,
+              poisoned: bool,
+          }
+          ''',
+              "track ambiguous storage failure state",
+          )
+          transition = replace_once(
+              transition,
+              '''        Ok(Self {
+                      store,
+                      state: full_replay,
+                      snapshot_path,
+                  })
+          ''',
+              '''        Ok(Self {
+                      store,
+                      state: full_replay,
+                      snapshot_path,
+                      poisoned: false,
+                  })
+          ''',
+              "initialize healthy ledger state",
+          )
+          transition = replace_once(
+              transition,
+              '''    ) -> Result<TransitionEvent, TransitionLedgerError> {
+                  let normalized = normalize_input(input)?;
+          ''',
+              '''    ) -> Result<TransitionEvent, TransitionLedgerError> {
+                  if self.poisoned {
+                      return Err(TransitionLedgerError::PoisonedAfterStorageFailure);
+                  }
+                  let normalized = normalize_input(input)?;
+          ''',
+              "block append after ambiguous storage failure",
+          )
+          transition = replace_once(
+              transition,
+              '''        let bytes = serde_cbor::to_vec(&event).map_err(encoding_error)?;
+                  self.store.append(&bytes).map_err(storage_error)?;
+                  sync_current_wal(&self.store)?;
+                  self.state = candidate;
+          ''',
+              '''        let bytes = serde_cbor::to_vec(&event).map_err(encoding_error)?;
+                  if let Err(error) = self.store.append(&bytes) {
+                      self.poisoned = true;
+                      return Err(storage_error(error));
+                  }
+                  self.state = candidate;
+          ''',
+              "poison ledger on any ambiguous WAL append or sync failure",
+          )
+          transition = replace_once(
+              transition,
+              '''            projection.observation_refs.sort();
+                      projection.observation_refs.dedup();
+                  }
+          ''',
+              '''            projection.observation_refs.sort();
+                      projection.observation_refs.dedup();
+                      projection.response_integrity_ref = None;
+                      projection.causal_audit_ref = None;
+                      projection.continuity_snapshot_ref = None;
+                  }
+          ''',
+              "invalidate derived evidence when observation generation changes",
+          )
+          transition = replace_once(
+              transition,
+              '''fn sync_current_wal(store: &Store) -> Result<(), TransitionLedgerError> {
+              let path = store
+                  .wal_dir()
+                  .join(format!("{:08}.wal", store.current_segment()));
+              OpenOptions::new()
+                  .read(true)
+                  .write(true)
+                  .open(path)
+                  .and_then(|file| file.sync_all())
+                  .map_err(storage_error)
+          }
+
+          ''',
+              "",
+              "remove duplicate path-based WAL sync",
+          )
+          transition_path.write_text(transition)
+          PY
+
+      - name: Format
+        run: cargo fmt --all -- --check
+
+      - name: Validate liminal-store
+        run: |
+          cargo check -p liminal-store
+          cargo test -p liminal-store --test trustworthy_transition_fixture
+          cargo test -p liminal-store trustworthy_transition
+
+      - name: Commit validated fixes
+        shell: bash
+        run: |
+          set -euo pipefail
+          if git diff --quiet; then
+            echo "No production changes to commit"
+            exit 0
+          fi
+          git config user.name "pr89-safety-bot"
+          git config user.email "actions@users.noreply.github.com"
+          git add liminal-db/crates/liminal-store/src/wal.rs \
+                  liminal-db/crates/liminal-store/src/trustworthy_transition.rs
+          git commit -m "fix: harden transition ledger durability [pr89-fix-applied]"
+
+      - name: Push validated commit
+        if: ${{ success() }}
+        env:
+          GH_TOKEN: ${{ github.token }}
+        shell: bash
+        run: |
+          set -euo pipefail
+          if git log -1 --pretty=%B | grep -q '\[pr89-fix-applied\]'; then
+            git push "https://x-access-token:${GH_TOKEN}@github.com/${GITHUB_REPOSITORY}.git" \
+              HEAD:fix/pr89-ledger-safety-v1
+          fi
