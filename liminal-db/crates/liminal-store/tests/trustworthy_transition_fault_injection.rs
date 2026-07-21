@@ -23,44 +23,70 @@ fn authorization(label: &str) -> TransitionEventInput {
     }
 }
 
+fn assert_failure_recovery(
+    failpoint: AppendFailpoint,
+    expected_recovered_events: u64,
+    label: &str,
+) {
+    let root = tempdir().expect("tempdir");
+    let mut ledger = TrustworthyTransitionLedger::open(root.path()).expect("open");
+
+    set_append_failpoint_for_test(failpoint);
+    let first_error = ledger
+        .append(authorization(&format!("first-{label}")))
+        .expect_err("injected append must fail");
+    assert!(matches!(first_error, TransitionLedgerError::Storage(_)));
+
+    let poisoned_error = ledger
+        .append(authorization(&format!("second-{label}")))
+        .expect_err("poisoned ledger must reject further append");
+    assert!(matches!(
+        poisoned_error,
+        TransitionLedgerError::PoisonedAfterStorageFailure
+    ));
+    drop(ledger);
+
+    let recovered = TrustworthyTransitionLedger::open(root.path()).expect("reopen and replay");
+    assert_eq!(
+        recovered.event_count(),
+        expected_recovered_events,
+        "unexpected replay result for {failpoint:?}"
+    );
+}
+
 #[test]
-fn append_failures_poison_until_reopen_and_replay() {
-    let cases = [
-        (AppendFailpoint::BeforeWrite, 0_u64),
-        (AppendFailpoint::AfterLengthWrite, 0_u64),
-        (AppendFailpoint::AfterPayloadWrite, 0_u64),
-        // The complete frame survives in this non-crash error simulation.
-        // A real pre-sync crash may lose it; reopen always follows the bytes that survived.
-        (AppendFailpoint::AfterWriteBeforeSync, 1_u64),
-        (AppendFailpoint::AfterSyncBeforeAck, 1_u64),
-    ];
+fn before_write_failure_recovers_zero_events() {
+    assert_failure_recovery(AppendFailpoint::BeforeWrite, 0, "before-write");
+}
 
-    for (index, (failpoint, expected_recovered_events)) in cases.into_iter().enumerate() {
-        let root = tempdir().expect("tempdir");
-        let mut ledger = TrustworthyTransitionLedger::open(root.path()).expect("open");
+#[test]
+fn length_only_tail_is_truncated() {
+    assert_failure_recovery(AppendFailpoint::AfterLengthWrite, 0, "after-length");
+}
 
-        set_append_failpoint_for_test(failpoint);
-        let first_error = ledger
-            .append(authorization(&format!("first-{index}")))
-            .expect_err("injected append must fail");
-        assert!(matches!(first_error, TransitionLedgerError::Storage(_)));
+#[test]
+fn payload_without_crc_tail_is_truncated() {
+    assert_failure_recovery(AppendFailpoint::AfterPayloadWrite, 0, "after-payload");
+}
 
-        let poisoned_error = ledger
-            .append(authorization(&format!("second-{index}")))
-            .expect_err("poisoned ledger must reject further append");
-        assert!(matches!(
-            poisoned_error,
-            TransitionLedgerError::PoisonedAfterStorageFailure
-        ));
-        drop(ledger);
+#[test]
+fn complete_unsynced_frame_is_replayed_when_present() {
+    // This is a non-crash error simulation, so the complete frame remains visible.
+    // A real pre-sync crash may lose it; reopen always follows the bytes that survived.
+    assert_failure_recovery(
+        AppendFailpoint::AfterWriteBeforeSync,
+        1,
+        "after-write-before-sync",
+    );
+}
 
-        let recovered = TrustworthyTransitionLedger::open(root.path()).expect("reopen and replay");
-        assert_eq!(
-            recovered.event_count(),
-            expected_recovered_events,
-            "unexpected replay result for {failpoint:?}"
-        );
-    }
+#[test]
+fn synced_unacknowledged_frame_is_replayed() {
+    assert_failure_recovery(
+        AppendFailpoint::AfterSyncBeforeAck,
+        1,
+        "after-sync-before-ack",
+    );
 }
 
 #[test]
