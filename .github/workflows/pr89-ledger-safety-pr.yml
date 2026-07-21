@@ -73,12 +73,34 @@ jobs:
         run: cargo test -p liminal-store --test trustworthy_transition_fixture -- --nocapture
 
       - name: Run existing trustworthy-transition tests
+        id: existing_tests
         if: ${{ steps.patch.outputs.skip != 'true' && steps.compile.outputs.status == '0' }}
+        continue-on-error: true
         working-directory: liminal-db
-        run: cargo test -p liminal-store trustworthy_transition -- --nocapture
+        shell: bash
+        run: |
+          set +e
+          cargo test -p liminal-store trustworthy_transition -- --nocapture > ../pr89-existing-tests.log 2>&1
+          status=$?
+          echo "status=$status" >> "$GITHUB_OUTPUT"
+          tail -n 120 ../pr89-existing-tests.log
+          exit "$status"
+
+      - name: Upload existing-test diagnostics
+        if: ${{ always() && steps.patch.outputs.skip != 'true' && steps.compile.outputs.status == '0' }}
+        uses: actions/upload-artifact@v4
+        with:
+          name: pr89-existing-tests-${{ github.run_id }}
+          path: pr89-existing-tests.log
+          if-no-files-found: error
+          retention-days: 7
+
+      - name: Stop on existing-test failure
+        if: ${{ steps.patch.outputs.skip != 'true' && steps.compile.outputs.status == '0' && steps.existing_tests.outputs.status != '0' }}
+        run: exit 1
 
       - name: Commit validated production fixes
-        if: ${{ steps.patch.outputs.skip != 'true' && steps.compile.outputs.status == '0' }}
+        if: ${{ steps.patch.outputs.skip != 'true' && steps.compile.outputs.status == '0' && steps.existing_tests.outputs.status == '0' }}
         shell: bash
         run: |
           set -euo pipefail
@@ -90,7 +112,7 @@ jobs:
           git commit -m "fix: harden transition ledger durability [pr89-fix-applied]"
 
       - name: Push exact validated commit
-        if: ${{ steps.patch.outputs.skip != 'true' && steps.compile.outputs.status == '0' }}
+        if: ${{ steps.patch.outputs.skip != 'true' && steps.compile.outputs.status == '0' && steps.existing_tests.outputs.status == '0' }}
         env:
           GH_TOKEN: ${{ github.token }}
         shell: bash
