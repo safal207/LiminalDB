@@ -24,6 +24,8 @@ jobs:
         working-directory: liminal-db
     steps:
       - uses: actions/checkout@v4
+        with:
+          persist-credentials: false
 
       - uses: dtolnay/rust-toolchain@stable
 
@@ -35,4 +37,25 @@ jobs:
         run: cargo check -p liminal-store
 
       - name: Test signed checkpoint and ledger integration
-        run: cargo test -q -p liminal-store --no-fail-fast
+        id: tests
+        continue-on-error: true
+        run: |
+          set +e
+          cargo test -q -p liminal-store --no-fail-fast > signed-checkpoint-conformance.log 2>&1
+          status=$?
+          echo "status=$status" >> "$GITHUB_OUTPUT"
+          tail -n 250 signed-checkpoint-conformance.log
+          exit "$status"
+
+      - name: Upload failure diagnostics
+        if: ${{ steps.tests.outputs.status != '0' }}
+        uses: actions/upload-artifact@v4
+        with:
+          name: signed-checkpoint-conformance-${{ github.run_id }}
+          path: liminal-db/signed-checkpoint-conformance.log
+          if-no-files-found: error
+          retention-days: 7
+
+      - name: Stop on test failure
+        if: ${{ steps.tests.outputs.status != '0' }}
+        run: exit 1
