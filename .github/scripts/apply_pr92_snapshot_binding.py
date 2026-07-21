@@ -58,6 +58,26 @@ impl TransitionLedgerSnapshotInfo {
 )
 transition = replace_once(
     transition,
+    '''    pub fn event_count(&self) -> u64 {
+        self.state.next_sequence.saturating_sub(1)
+    }
+
+''',
+    '''    pub fn event_count(&self) -> u64 {
+        self.state.next_sequence.saturating_sub(1)
+    }
+
+    pub(crate) fn checkpoint_projection_digest(
+        &self,
+    ) -> Result<String, TransitionLedgerError> {
+        projection_digest(&self.state)
+    }
+
+''',
+    "canonical checkpoint projection digest",
+)
+transition = replace_once(
+    transition,
     '''        Ok(TransitionLedgerSnapshotInfo {
             path: self.snapshot_path.clone(),
             offset: snapshot.body.wal_offset.into(),
@@ -105,7 +125,9 @@ checkpoint = replace_once(
             .ok_or(CheckpointError::MissingLedgerHead)?
             .to_owned();
         validate_ref(&event_chain_head, "event_chain_head")?;
-        let projection_digest = digest_cbor(self.projections())?;
+        let projection_digest = self
+            .checkpoint_projection_digest()
+            .map_err(|error| CheckpointError::Encoding(error.to_string()))?;
         if snapshot.path.as_path() != self.snapshot_path()
             || snapshot.event_count != self.event_count()
             || snapshot.projection_count != self.projections().len()
