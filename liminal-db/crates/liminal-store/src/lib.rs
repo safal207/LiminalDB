@@ -16,4 +16,6 @@ pub use trustworthy_transition::{
     TransitionLedgerSnapshotInfo, TransitionLinks, TransitionProjection,
     TransitionRecordKind, TrustworthyTransitionLedger,
 };
+#[cfg(feature = "durability-test-hooks")]
+pub use wal::{set_append_failpoint_for_test, AppendFailpoint};
 pub use wal::{Offset, Store, WalStream};
