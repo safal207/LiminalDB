@@ -3,6 +3,9 @@ name = "liminal-store"
 version = "0.1.0"
 edition = "2021"
 
+[features]
+durability-test-hooks = []
+
 [dependencies]
 anyhow = "1"
 crc32fast = "1"
