@@ -27,32 +27,51 @@ jobs:
           fetch-depth: 0
           persist-credentials: false
 
-      - name: Merge current main and migrate snapshot API
+      - name: Merge current main
         run: |
           set -euo pipefail
           git fetch origin main
           git merge --no-commit --no-ff origin/main
+
+      - name: Migrate snapshot fixture API
+        run: |
+          set -euo pipefail
           python3 - <<'PY'
           from pathlib import Path
 
-          fixture_path = Path('liminal-db/crates/liminal-store/tests/trustworthy_transition_fixture.rs')
-          fixture = fixture_path.read_text()
+          path = Path('liminal-db/crates/liminal-store/tests/trustworthy_transition_fixture.rs')
+          text = path.read_text()
           old = 'ledger.write_snapshot(2).expect("snapshot").path\n'
-          new = 'ledger\n                    .write_snapshot(2)\n                    .expect("snapshot")\n                    .path()\n                    .to_path_buf()\n'
-          if fixture.count(old) != 1:
-              raise SystemExit(f'fixture path migration expected one match, found {fixture.count(old)}')
-          fixture_path.write_text(fixture.replace(old, new, 1))
+          new = '''ledger
+                    .write_snapshot(2)
+                    .expect("snapshot")
+                    .path()
+                    .to_path_buf()
+          '''
+          count = text.count(old)
+          if count != 1:
+              raise SystemExit(f'fixture path migration expected one match, found {count}')
+          path.write_text(text.replace(old, new, 1))
+          PY
 
-          checkpoint_path = Path('liminal-db/crates/liminal-store/src/checkpoint.rs')
-          checkpoint = checkpoint_path.read_text()
-          dead = '''fn digest_cbor<T: Serialize>(value: &T) -> Result<String, CheckpointError> {
+      - name: Remove obsolete checkpoint digest helper
+        run: |
+          set -euo pipefail
+          python3 - <<'PY'
+          from pathlib import Path
+
+          path = Path('liminal-db/crates/liminal-store/src/checkpoint.rs')
+          text = path.read_text()
+          old = '''fn digest_cbor<T: Serialize>(value: &T) -> Result<String, CheckpointError> {
               Ok(sha256_ref(&canonical_bytes(value)?))
           }
 
           '''
-          if checkpoint.count(dead) != 1:
-              raise SystemExit(f'dead digest helper expected one match, found {checkpoint.count(dead)}')
-          checkpoint_path.write_text(checkpoint.replace(dead, '', 1))
+          old = old.replace('              Ok', '    Ok').replace('          }', '}').replace('          \n', '\n')
+          count = text.count(old)
+          if count != 1:
+              raise SystemExit(f'dead digest helper expected one match, found {count}')
+          path.write_text(text.replace(old, '', 1))
           PY
           cargo fmt --manifest-path liminal-db/Cargo.toml --all
 
