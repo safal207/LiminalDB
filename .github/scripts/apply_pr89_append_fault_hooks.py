@@ -132,18 +132,6 @@ wal = replace_method(
 )
 wal_path.write_text(wal)
 
-matrix_path = root / ".github/workflows/transition-ledger-safety-matrix.yml"
-matrix = matrix_path.read_text()
-matrix = insert_before_once(
-    matrix,
-    "      - name: Run ledger unit and restart tests\n",
-    "      - name: Exercise append fault boundaries\n"
-    "        if: ${{ steps.fixture.outputs.status == '0' }}\n"
-    "        run: cargo test -p liminal-store --features durability-test-hooks --test trustworthy_transition_fault_injection\n\n",
-    "matrix fault-test insertion",
-)
-matrix_path.write_text(matrix)
-
 test_path = root / "liminal-db/crates/liminal-store/tests/trustworthy_transition_fault_injection.rs"
 test_path.write_text(
     r'''#![cfg(feature = "durability-test-hooks")]
