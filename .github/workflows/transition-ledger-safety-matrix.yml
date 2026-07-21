@@ -78,6 +78,34 @@ jobs:
         if: ${{ steps.fixture.outputs.status != '0' }}
         run: exit 1
 
+      - name: Reject before-write failure
+        if: ${{ steps.fixture.outputs.status == '0' }}
+        run: cargo test -p liminal-store --features durability-test-hooks --test trustworthy_transition_fault_injection before_write_failure_recovers_zero_events -- --nocapture
+
+      - name: Recover length-only tail
+        if: ${{ steps.fixture.outputs.status == '0' }}
+        run: cargo test -p liminal-store --features durability-test-hooks --test trustworthy_transition_fault_injection length_only_tail_is_truncated -- --nocapture
+
+      - name: Recover payload-without-CRC tail
+        if: ${{ steps.fixture.outputs.status == '0' }}
+        run: cargo test -p liminal-store --features durability-test-hooks --test trustworthy_transition_fault_injection payload_without_crc_tail_is_truncated -- --nocapture
+
+      - name: Replay complete unsynced frame when present
+        if: ${{ steps.fixture.outputs.status == '0' }}
+        run: cargo test -p liminal-store --features durability-test-hooks --test trustworthy_transition_fault_injection complete_unsynced_frame_is_replayed_when_present -- --nocapture
+
+      - name: Replay synced unacknowledged frame
+        if: ${{ steps.fixture.outputs.status == '0' }}
+        run: cargo test -p liminal-store --features durability-test-hooks --test trustworthy_transition_fault_injection synced_unacknowledged_frame_is_replayed -- --nocapture
+
+      - name: Verify failpoint thread isolation
+        if: ${{ steps.fixture.outputs.status == '0' }}
+        run: cargo test -p liminal-store --features durability-test-hooks --test trustworthy_transition_fault_injection append_failpoint_is_thread_local -- --nocapture
+
+      - name: Reject ambiguous partial payload
+        if: ${{ steps.fixture.outputs.status == '0' }}
+        run: cargo test -p liminal-store --features durability-test-hooks --test trustworthy_transition_fault_injection ambiguous_partial_payload_fails_closed_on_reopen -- --nocapture
+
       - name: Run ledger unit and restart tests
         if: ${{ steps.fixture.outputs.status == '0' }}
         run: cargo test -p liminal-store trustworthy_transition

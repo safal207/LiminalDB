@@ -1,3 +1,5 @@
+#[cfg(any(test, feature = "durability-test-hooks"))]
+use std::cell::Cell;
 use std::fs::{create_dir_all, File, OpenOptions};
 use std::io::{Read, Seek, SeekFrom, Write};
 use std::path::{Path, PathBuf};
@@ -10,6 +12,37 @@ use fs2::FileExt;
 const WAL_EXTENSION: &str = "wal";
 const DEFAULT_SEGMENT_SIZE: u64 = 32 * 1024 * 1024; // 32 MiB
 const WRITER_LOCK_FILE: &str = ".liminaldb-writer.lock";
+
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+pub enum AppendFailpoint {
+    Disabled,
+    BeforeWrite,
+    AfterLengthWrite,
+    AfterPayloadWrite,
+    AfterWriteBeforeSync,
+    AfterSyncBeforeAck,
+}
+
+#[cfg(any(test, feature = "durability-test-hooks"))]
+thread_local! {
+    static APPEND_FAILPOINT: Cell<AppendFailpoint> = const {
+        Cell::new(AppendFailpoint::Disabled)
+    };
+}
+
+#[cfg(any(test, feature = "durability-test-hooks"))]
+pub fn set_append_failpoint_for_test(failpoint: AppendFailpoint) {
+    APPEND_FAILPOINT.with(|slot| slot.set(failpoint));
+}
+
+#[cfg(any(test, feature = "durability-test-hooks"))]
+fn take_append_failpoint() -> AppendFailpoint {
+    APPEND_FAILPOINT.with(|slot| {
+        let failpoint = slot.get();
+        slot.set(AppendFailpoint::Disabled);
+        failpoint
+    })
+}
 
 #[derive(Debug, Clone, Copy, PartialEq, Eq, PartialOrd, Ord)]
 pub struct Offset {
@@ -55,8 +88,31 @@ impl Store {
     }
 
     pub fn append(&mut self, bytes: &[u8]) -> Result<Offset> {
-        let offset = self.writer.append(bytes)?;
+        #[cfg(any(test, feature = "durability-test-hooks"))]
+        let failpoint = take_append_failpoint();
+        #[cfg(not(any(test, feature = "durability-test-hooks")))]
+        let failpoint = AppendFailpoint::Disabled;
+
+        if failpoint == AppendFailpoint::BeforeWrite {
+            return Err(anyhow!("injected append failure before WAL write"));
+        }
+
+        let offset = self.writer.append(bytes, failpoint)?;
+
+        if failpoint == AppendFailpoint::AfterWriteBeforeSync {
+            return Err(anyhow!(
+                "injected append failure after WAL write before sync"
+            ));
+        }
+
         self.writer.sync_all()?;
+
+        if failpoint == AppendFailpoint::AfterSyncBeforeAck {
+            return Err(anyhow!(
+                "injected append failure after sync before acknowledgement"
+            ));
+        }
+
         Ok(offset)
     }
 
@@ -178,17 +234,19 @@ impl WalWriter {
         let segment = segments.last().copied().unwrap_or(1);
         let file_path = wal_path(data_dir, segment);
         let created = !file_path.exists();
-        let file = OpenOptions::new()
+        let mut file = OpenOptions::new()
             .create(true)
-            .append(true)
             .read(true)
+            .write(true)
             .open(&file_path)
             .with_context(|| format!("failed to open wal segment {:?}", file_path))?;
-        if created {
+        let size = if created {
             file.sync_all()?;
             sync_directory(data_dir)?;
-        }
-        let size = file.metadata()?.len();
+            0
+        } else {
+            recover_last_segment_tail(&mut file, &file_path)?
+        };
         Ok(WalWriter {
             data_dir: data_dir.to_path_buf(),
             rotation,
@@ -198,7 +256,7 @@ impl WalWriter {
         })
     }
 
-    fn append(&mut self, payload: &[u8]) -> Result<Offset> {
+    fn append(&mut self, payload: &[u8], failpoint: AppendFailpoint) -> Result<Offset> {
         let record_size = 4u64 + payload.len() as u64 + 4;
         if self.size + record_size > self.rotation {
             self.rotate()?;
@@ -212,7 +270,13 @@ impl WalWriter {
         hasher.update(payload);
         let checksum = hasher.finalize();
         self.file.write_all(&len.to_le_bytes())?;
+        if failpoint == AppendFailpoint::AfterLengthWrite {
+            return Err(anyhow!("injected append failure after WAL length write"));
+        }
         self.file.write_all(payload)?;
+        if failpoint == AppendFailpoint::AfterPayloadWrite {
+            return Err(anyhow!("injected append failure after WAL payload write"));
+        }
         self.file.write_all(&checksum.to_le_bytes())?;
         self.file.flush()?;
         self.size += record_size;
@@ -242,6 +306,76 @@ impl WalWriter {
         self.file = file;
         Ok(())
     }
+}
+
+fn recover_last_segment_tail(file: &mut File, path: &Path) -> Result<u64> {
+    let file_len = file.metadata()?.len();
+    let mut position = 0_u64;
+    file.seek(SeekFrom::Start(0))?;
+
+    while position < file_len {
+        let frame_start = position;
+        let remaining_frame_bytes = file_len - frame_start;
+        if remaining_frame_bytes < 4 {
+            return truncate_torn_tail(file, path, frame_start, file_len);
+        }
+
+        let mut len_buf = [0_u8; 4];
+        file.read_exact(&mut len_buf)?;
+        let payload_len = u32::from_le_bytes(len_buf) as u64;
+        let payload_start = frame_start + 4;
+        let available_after_header = file_len - payload_start;
+        let frame_end = payload_start
+            .checked_add(payload_len)
+            .and_then(|value| value.checked_add(4))
+            .ok_or_else(|| anyhow!("wal frame length overflow in {path:?} at {frame_start}"))?;
+
+        if frame_end > file_len {
+            if available_after_header == 0
+                || (available_after_header >= payload_len
+                    && available_after_header < payload_len + 4)
+            {
+                return truncate_torn_tail(file, path, frame_start, file_len);
+            }
+            return Err(anyhow!(
+                "ambiguous partial WAL payload in {path:?} at offset {frame_start}"
+            ));
+        }
+
+        let mut hasher = Crc32::new();
+        let mut remaining = payload_len;
+        let mut buffer = [0_u8; 8192];
+        while remaining > 0 {
+            let chunk_len = remaining.min(buffer.len() as u64) as usize;
+            file.read_exact(&mut buffer[..chunk_len])?;
+            hasher.update(&buffer[..chunk_len]);
+            remaining -= chunk_len as u64;
+        }
+
+        let mut crc_buf = [0_u8; 4];
+        file.read_exact(&mut crc_buf)?;
+        let expected = hasher.finalize();
+        let actual = u32::from_le_bytes(crc_buf);
+        if expected != actual {
+            return Err(anyhow!(
+                "wal checksum mismatch in {path:?} at offset {frame_start}"
+            ));
+        }
+        position = frame_end;
+    }
+
+    file.seek(SeekFrom::End(0))?;
+    Ok(position)
+}
+
+fn truncate_torn_tail(file: &mut File, path: &Path, valid_len: u64, file_len: u64) -> Result<u64> {
+    file.set_len(valid_len).with_context(|| {
+        format!("failed to truncate torn WAL tail in {path:?} from {file_len} to {valid_len}")
+    })?;
+    file.sync_all()
+        .with_context(|| format!("failed to sync repaired WAL segment {path:?}"))?;
+    file.seek(SeekFrom::End(0))?;
+    Ok(valid_len)
 }
 
 #[cfg(unix)]
@@ -506,11 +640,9 @@ mod tests {
         file.write_all(&byte).expect("write");
         drop(file);
 
-        let store = Store::open(dir.path()).expect("reopen store");
-        let mut stream = store.stream_from(Offset::start()).expect("stream");
         assert!(
-            stream.next().unwrap().is_err(),
-            "corruption must be detected"
+            Store::open(dir.path()).is_err(),
+            "checksum corruption must fail closed during store open"
         );
     }
 }
