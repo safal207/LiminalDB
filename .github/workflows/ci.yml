@@ -42,3 +42,5 @@ jobs:
           cargo test -q -p liminal-core --no-fail-fast
           cargo test -q -p liminal-store --no-fail-fast
 
+      - name: Trustworthy-transition ledger restart demo
+        run: cargo run -q -p liminal-store --example trustworthy_transition_ledger
