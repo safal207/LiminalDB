@@ -3,61 +3,59 @@ name: Signed Checkpoint Conformance
 on:
   pull_request:
     paths:
-      - "liminal-db/Cargo.lock"
       - "liminal-db/crates/liminal-store/src/checkpoint.rs"
       - "liminal-db/crates/liminal-store/src/lib.rs"
       - "liminal-db/crates/liminal-store/Cargo.toml"
       - "liminal-db/crates/liminal-store/tests/checkpoint_ledger_integration.rs"
       - "liminal-db/crates/liminal-store/tests/fixtures/signed-checkpoint-*"
+      - "liminal-db/crates/liminal-store/examples/signed_checkpoint_*"
       - "docs/integrations/SIGNED_CHECKPOINT_*"
       - ".github/workflows/signed-checkpoint-conformance.yml"
   workflow_dispatch:
 
 permissions:
-  contents: write
-
-concurrency:
-  group: pr92-lockfile-cleanup-${{ github.event.pull_request.number }}
-  cancel-in-progress: false
+  contents: read
 
 jobs:
-  validate-clean-push:
-    if: ${{ github.head_ref == 'feat/checkpoint-anchors-v0-1' }}
+  verify:
     runs-on: ubuntu-latest
+    defaults:
+      run:
+        working-directory: liminal-db
     steps:
-      - name: Checkout exact branch head
-        uses: actions/checkout@v4
+      - uses: actions/checkout@v4
         with:
-          ref: feat/checkpoint-anchors-v0-1
-          fetch-depth: 0
           persist-credentials: false
 
-      - name: Validate trusted-time correction
-        working-directory: liminal-db
-        run: |
-          set -euo pipefail
-          cargo check -p liminal-store
-          cargo test -q -p liminal-store --no-fail-fast
+      - uses: dtolnay/rust-toolchain@stable
 
-      - name: Restore lockfile from main after validation
-        run: |
-          set -euo pipefail
-          git fetch origin main
-          git checkout origin/main -- liminal-db/Cargo.lock
-          git diff --check
+      - uses: Swatinem/rust-cache@v2
+        with:
+          workspaces: liminal-db
 
-      - name: Commit clean scope when needed
-        env:
-          GH_TOKEN: ${{ github.token }}
+      - name: Check liminal-store
+        run: cargo check -p liminal-store
+
+      - name: Test full liminal-store conformance
+        id: tests
+        continue-on-error: true
         run: |
-          set -euo pipefail
-          if git diff --quiet && git diff --cached --quiet; then
-            echo "Cargo.lock already matches main."
-            exit 0
-          fi
-          git config user.name "github-actions[bot]"
-          git config user.email "41898282+github-actions[bot]@users.noreply.github.com"
-          git add liminal-db/Cargo.lock
-          git commit -m "chore: restore checkpoint PR lockfile scope"
-          git remote set-url origin "https://x-access-token:${GH_TOKEN}@github.com/${GITHUB_REPOSITORY}.git"
-          git push origin HEAD:feat/checkpoint-anchors-v0-1
+          set +e
+          cargo test -q -p liminal-store --no-fail-fast > signed-checkpoint-conformance.log 2>&1
+          status=$?
+          echo "status=$status" >> "$GITHUB_OUTPUT"
+          tail -n 250 signed-checkpoint-conformance.log
+          exit "$status"
+
+      - name: Upload failure diagnostics
+        if: ${{ steps.tests.outputs.status != '0' }}
+        uses: actions/upload-artifact@v4
+        with:
+          name: signed-checkpoint-conformance-${{ github.run_id }}
+          path: liminal-db/signed-checkpoint-conformance.log
+          if-no-files-found: error
+          retention-days: 7
+
+      - name: Stop on test failure
+        if: ${{ steps.tests.outputs.status != '0' }}
+        run: exit 1
