@@ -54,7 +54,30 @@ jobs:
         run: cargo check -p liminal-store
 
       - name: Execute canonical ledger fixture
-        run: cargo test -p liminal-store --test trustworthy_transition_fixture
+        id: fixture
+        continue-on-error: true
+        shell: bash
+        run: |
+          set +e
+          cargo test -p liminal-store --test trustworthy_transition_fixture -- --nocapture > "../transition-ledger-fixture-${RUNNER_OS}.log" 2>&1
+          status=$?
+          echo "status=$status" >> "$GITHUB_OUTPUT"
+          tail -n 120 "../transition-ledger-fixture-${RUNNER_OS}.log"
+          exit "$status"
+
+      - name: Upload fixture diagnostics
+        if: ${{ always() }}
+        uses: actions/upload-artifact@v4
+        with:
+          name: transition-ledger-fixture-${{ runner.os }}-${{ github.run_id }}
+          path: transition-ledger-fixture-${{ runner.os }}.log
+          if-no-files-found: error
+          retention-days: 7
+
+      - name: Stop on fixture failure
+        if: ${{ steps.fixture.outputs.status != '0' }}
+        run: exit 1
 
       - name: Run ledger unit and restart tests
+        if: ${{ steps.fixture.outputs.status == '0' }}
         run: cargo test -p liminal-store trustworthy_transition
