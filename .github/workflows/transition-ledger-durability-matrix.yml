@@ -88,7 +88,7 @@ jobs:
           keep_ours = lambda ours, theirs: ours
           keep_theirs = lambda ours, theirs: theirs
           resolve('liminal-db/crates/liminal-store/Cargo.toml', [
-              lambda ours, theirs: '[features]\ndefault = []\ndurability-failpoints = []\ndurability-test-hooks = []\n',
+              lambda ours, theirs: 'default = []\ndurability-failpoints = []\ndurability-test-hooks = []\n',
               keep_ours,
           ])
           resolve('liminal-db/crates/liminal-store/src/trustworthy_transition.rs', [keep_theirs])
