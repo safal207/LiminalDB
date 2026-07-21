@@ -1,9 +1,10 @@
 name: PR92 Snapshot Binding Fix
 
 on:
-  push:
+  pull_request:
     branches:
-      - feat/checkpoint-anchors-v0-1
+      - main
+    types: [opened, synchronize, reopened]
     paths:
       - '.github/scripts/apply_pr92_snapshot_binding.py'
       - '.github/workflows/pr92-snapshot-binding-fix.yml'
@@ -12,11 +13,12 @@ permissions:
   contents: write
 
 concurrency:
-  group: pr92-snapshot-binding-fix
+  group: pr92-snapshot-binding-fix-${{ github.event.pull_request.number }}
   cancel-in-progress: false
 
 jobs:
   apply-validate-push:
+    if: ${{ github.head_ref == 'feat/checkpoint-anchors-v0-1' }}
     runs-on: ubuntu-latest
     steps:
       - name: Checkout exact branch head
