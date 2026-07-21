@@ -1,3 +1,4 @@
+mod checkpoint;
 mod codec;
 mod gc;
 mod journal_impl;
@@ -5,6 +6,12 @@ mod snapshot;
 mod trustworthy_transition;
 mod wal;
 
+pub use checkpoint::{
+    verify_checkpoint_chain, verify_signed_checkpoint, AntiRollbackStatus, CheckpointError,
+    CheckpointLedgerExt, CheckpointManifestBody, CheckpointMaterial, CheckpointSigner,
+    ExternalAnchor, SignedCheckpointManifest, TrustedCheckpointKey, TrustedKeyRegistry,
+    VerifiedCheckpointChain,
+};
 pub use codec::{decode_delta, encode_delta};
 pub use gc::gc_compact;
 pub use journal_impl::{DiskJournal, SnapshotInfo, StoreStats};

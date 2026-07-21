@@ -332,7 +332,11 @@ fn execute_case(case_id: &str) -> Result<&'static str, &'static str> {
             let snapshot_path = {
                 let mut ledger = TrustworthyTransitionLedger::open(root.path()).expect("open");
                 append_authorization(&mut ledger, "transition-a", "subject-a", "auth-a");
-                ledger.write_snapshot(2).expect("snapshot").path
+                ledger
+                    .write_snapshot(2)
+                    .expect("snapshot")
+                    .path()
+                    .to_path_buf()
             };
             let bytes = fs::read(&snapshot_path).expect("read snapshot");
             let mut value: CborValue = serde_cbor::from_slice(&bytes).expect("snapshot CBOR");
