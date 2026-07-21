@@ -36,7 +36,7 @@ jobs:
       - name: Check liminal-store
         run: cargo check -p liminal-store
 
-      - name: Test signed checkpoint and ledger integration
+      - name: Test full liminal-store conformance
         id: tests
         continue-on-error: true
         run: |
