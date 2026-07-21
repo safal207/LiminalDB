@@ -1,5 +1,5 @@
 use std::collections::{BTreeMap, BTreeSet};
-use std::fs::{self, File, OpenOptions};
+use std::fs::{self, OpenOptions};
 use std::io::Write;
 use std::path::{Path, PathBuf};
 
@@ -279,12 +279,17 @@ pub enum TransitionLedgerError {
     ContinuityDimensionsRequired,
     #[error("invalid links for record kind {0:?}")]
     InvalidLinks(TransitionRecordKind),
+    #[error(
+        "ledger is poisoned after an ambiguous storage failure; reopen and replay before appending"
+    )]
+    PoisonedAfterStorageFailure,
 }
 
 pub struct TrustworthyTransitionLedger {
     store: Store,
     state: LedgerState,
     snapshot_path: PathBuf,
+    poisoned: bool,
 }
 
 impl TrustworthyTransitionLedger {
@@ -316,6 +321,7 @@ impl TrustworthyTransitionLedger {
             store,
             state: full_replay,
             snapshot_path,
+            poisoned: false,
         })
     }
 
@@ -326,6 +332,9 @@ impl TrustworthyTransitionLedger {
         &mut self,
         input: TransitionEventInput,
     ) -> Result<TransitionEvent, TransitionLedgerError> {
+        if self.poisoned {
+            return Err(TransitionLedgerError::PoisonedAfterStorageFailure);
+        }
         let normalized = normalize_input(input)?;
         let body = TransitionEventBody {
             schema: EVENT_SCHEMA.to_owned(),
@@ -348,8 +357,10 @@ impl TrustworthyTransitionLedger {
         let mut candidate = self.state.clone();
         apply_event(&mut candidate, &event)?;
         let bytes = serde_cbor::to_vec(&event).map_err(encoding_error)?;
-        self.store.append(&bytes).map_err(storage_error)?;
-        sync_current_wal(&self.store)?;
+        if let Err(error) = self.store.append(&bytes) {
+            self.poisoned = true;
+            return Err(storage_error(error));
+        }
         self.state = candidate;
         Ok(event)
     }
@@ -770,6 +781,9 @@ fn apply_dependent_record(
                 .push(event.body.record_ref.clone());
             projection.observation_refs.sort();
             projection.observation_refs.dedup();
+            projection.response_integrity_ref = None;
+            projection.causal_audit_ref = None;
+            projection.continuity_snapshot_ref = None;
         }
         TransitionRecordKind::ResponseIntegrity => {
             projection.response_integrity_ref = Some(event.body.record_ref.clone());
@@ -948,22 +962,8 @@ fn atomic_write(path: &Path, bytes: &[u8]) -> Result<(), TransitionLedgerError> 
         file.sync_all().map_err(storage_error)?;
     }
     fs::rename(&temporary, path).map_err(storage_error)?;
-    File::open(parent)
-        .and_then(|directory| directory.sync_all())
-        .map_err(storage_error)?;
+    crate::wal::sync_directory(parent).map_err(storage_error)?;
     Ok(())
-}
-
-fn sync_current_wal(store: &Store) -> Result<(), TransitionLedgerError> {
-    let path = store
-        .wal_dir()
-        .join(format!("{:08}.wal", store.current_segment()));
-    OpenOptions::new()
-        .read(true)
-        .write(true)
-        .open(path)
-        .and_then(|file| file.sync_all())
-        .map_err(storage_error)
 }
 
 fn storage_error(error: impl std::fmt::Display) -> TransitionLedgerError {
@@ -1419,8 +1419,7 @@ mod tests {
         let mut raw_store = Store::open(directory.path()).expect("raw store");
         raw_store
             .append(&serde_cbor::to_vec(&event).expect("encode event"))
-            .expect("append bad semantic event");
-        sync_current_wal(&raw_store).expect("sync");
+            .expect("append and sync bad semantic event");
         drop(raw_store);
 
         let error = TrustworthyTransitionLedger::open(directory.path())

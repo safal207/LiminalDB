@@ -62,6 +62,11 @@
       "case_id": "snapshot_tail_equals_full_replay",
       "mutation": "append an observation after snapshot and restart",
       "expected": "RECOVERED"
+    },
+    {
+      "case_id": "wal_rotation_round_trip",
+      "mutation": "append enough framed records to rotate the WAL and replay every record",
+      "expected": "RECOVERED"
     }
   ]
 }
