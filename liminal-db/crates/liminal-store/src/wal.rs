@@ -1,6 +1,8 @@
 use std::fs::{create_dir_all, File, OpenOptions};
 use std::io::{Read, Seek, SeekFrom, Write};
 use std::path::{Path, PathBuf};
+#[cfg(any(test, feature = "durability-test-hooks"))]
+use std::sync::atomic::{AtomicU8, Ordering};
 
 use anyhow::{anyhow, Context, Result};
 use crc32fast::Hasher as Crc32;
@@ -10,6 +12,34 @@ use fs2::FileExt;
 const WAL_EXTENSION: &str = "wal";
 const DEFAULT_SEGMENT_SIZE: u64 = 32 * 1024 * 1024; // 32 MiB
 const WRITER_LOCK_FILE: &str = ".liminaldb-writer.lock";
+
+#[cfg(any(test, feature = "durability-test-hooks"))]
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+#[repr(u8)]
+pub enum AppendFailpoint {
+    Disabled = 0,
+    BeforeWrite = 1,
+    AfterWriteBeforeSync = 2,
+    AfterSyncBeforeAck = 3,
+}
+
+#[cfg(any(test, feature = "durability-test-hooks"))]
+static APPEND_FAILPOINT: AtomicU8 = AtomicU8::new(AppendFailpoint::Disabled as u8);
+
+#[cfg(any(test, feature = "durability-test-hooks"))]
+pub fn set_append_failpoint_for_test(failpoint: AppendFailpoint) {
+    APPEND_FAILPOINT.store(failpoint as u8, Ordering::SeqCst);
+}
+
+#[cfg(any(test, feature = "durability-test-hooks"))]
+fn take_append_failpoint() -> AppendFailpoint {
+    match APPEND_FAILPOINT.swap(AppendFailpoint::Disabled as u8, Ordering::SeqCst) {
+        1 => AppendFailpoint::BeforeWrite,
+        2 => AppendFailpoint::AfterWriteBeforeSync,
+        3 => AppendFailpoint::AfterSyncBeforeAck,
+        _ => AppendFailpoint::Disabled,
+    }
+}
 
 #[derive(Debug, Clone, Copy, PartialEq, Eq, PartialOrd, Ord)]
 pub struct Offset {
@@ -55,8 +85,32 @@ impl Store {
     }
 
     pub fn append(&mut self, bytes: &[u8]) -> Result<Offset> {
+        #[cfg(any(test, feature = "durability-test-hooks"))]
+        let failpoint = take_append_failpoint();
+
+        #[cfg(any(test, feature = "durability-test-hooks"))]
+        if failpoint == AppendFailpoint::BeforeWrite {
+            return Err(anyhow!("injected append failure before WAL write"));
+        }
+
         let offset = self.writer.append(bytes)?;
+
+        #[cfg(any(test, feature = "durability-test-hooks"))]
+        if failpoint == AppendFailpoint::AfterWriteBeforeSync {
+            return Err(anyhow!(
+                "injected append failure after WAL write before sync"
+            ));
+        }
+
         self.writer.sync_all()?;
+
+        #[cfg(any(test, feature = "durability-test-hooks"))]
+        if failpoint == AppendFailpoint::AfterSyncBeforeAck {
+            return Err(anyhow!(
+                "injected append failure after sync before acknowledgement"
+            ));
+        }
+
         Ok(offset)
     }
 
