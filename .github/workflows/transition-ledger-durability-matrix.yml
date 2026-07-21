@@ -63,74 +63,23 @@ jobs:
           old = ' "crc32fast",\n "fs2",\n'
           new = ' "crc32fast",\n "ed25519-dalek",\n "fs2",\n'
           if main.count(old) != 1:
-              raise SystemExit(f'expected one liminal-store lock insertion point, found {main.count(old)}')
+              raise SystemExit(
+                  f'expected one liminal-store lock insertion point, found {main.count(old)}'
+              )
           expected = main.replace(old, new, 1)
           if current != expected:
-              raise SystemExit('Cargo.lock contains changes beyond the required ed25519-dalek dependency edge')
+              raise SystemExit(
+                  'Cargo.lock contains changes beyond the required ed25519-dalek dependency edge'
+              )
           PY
-
-      - name: Restore permanent durability matrix workflow
-        run: |
-          cat > .github/workflows/transition-ledger-durability-matrix.yml <<'YAML'
-          name: Transition Ledger Durability Matrix
-
-          on:
-            pull_request:
-              paths:
-                - "liminal-db/crates/liminal-store/src/durability.rs"
-                - "liminal-db/crates/liminal-store/src/snapshot_durability.rs"
-                - "liminal-db/crates/liminal-store/src/wal.rs"
-                - "liminal-db/crates/liminal-store/src/lib.rs"
-                - "liminal-db/crates/liminal-store/Cargo.toml"
-                - "liminal-db/crates/liminal-store/examples/durability_crash_harness.rs"
-                - "tools/run_transition_durability_matrix.py"
-                - "docs/integrations/TRANSITION_LEDGER_DURABILITY_MATRIX_V0_1.md"
-                - ".github/workflows/transition-ledger-durability-matrix.yml"
-            workflow_dispatch:
-
-          permissions:
-            contents: read
-
-          jobs:
-            durability:
-              strategy:
-                fail-fast: false
-                matrix:
-                  os: [ubuntu-latest, windows-latest, macos-latest]
-              runs-on: ${{ matrix.os }}
-              steps:
-                - uses: actions/checkout@v4
-
-                - uses: dtolnay/rust-toolchain@stable
-
-                - uses: Swatinem/rust-cache@v2
-                  with:
-                    workspaces: liminal-db
-
-                - name: Test durability APIs
-                  working-directory: liminal-db
-                  run: cargo test -q -p liminal-store --features durability-failpoints --no-fail-fast
-
-                - name: Run process-crash durability matrix
-                  run: >-
-                    python tools/run_transition_durability_matrix.py
-                    --output artifacts/transition-ledger-durability-${{ matrix.os }}.json
-
-                - name: Upload durability evidence
-                  uses: actions/upload-artifact@v4
-                  with:
-                    name: transition-ledger-durability-${{ matrix.os }}
-                    path: artifacts/transition-ledger-durability-${{ matrix.os }}.json
-                    if-no-files-found: error
-          YAML
-          rm -rf artifacts
-          git diff --check
 
       - name: Commit clean reconciled scope
         env:
           GH_TOKEN: ${{ github.token }}
         run: |
           set -euo pipefail
+          rm -rf artifacts
+          git diff --check
           git config user.name "github-actions[bot]"
           git config user.email "41898282+github-actions[bot]@users.noreply.github.com"
           git add -A
