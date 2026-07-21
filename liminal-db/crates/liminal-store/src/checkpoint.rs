@@ -122,12 +122,14 @@ pub enum CheckpointError {
     SignatureVerificationFailed,
     #[error("trusted checkpoint key is unknown")]
     UnknownKey,
-    #[error("checkpoint key is not valid yet")]
+    #[error("checkpoint key is not valid at trusted verification time")]
     KeyNotYetValid,
-    #[error("checkpoint key was expired at issuance")]
+    #[error("checkpoint key is expired at trusted verification time")]
     KeyExpired,
-    #[error("checkpoint key was revoked at issuance")]
+    #[error("checkpoint key is revoked at trusted verification time")]
     KeyRevoked,
+    #[error("checkpoint issuance time is later than trusted verification time")]
+    CheckpointFromFuture,
     #[error("checkpoint was expired at verification time")]
     CheckpointExpired,
     #[error("checkpoint expiry must be later than issuance")]
@@ -168,6 +170,7 @@ impl CheckpointError {
             Self::KeyNotYetValid => "KEY_NOT_YET_VALID",
             Self::KeyExpired => "KEY_EXPIRED",
             Self::KeyRevoked => "KEY_REVOKED",
+            Self::CheckpointFromFuture => "CHECKPOINT_FROM_FUTURE",
             Self::CheckpointExpired => "CHECKPOINT_EXPIRED",
             Self::InvalidExpiry => "INVALID_EXPIRY",
             Self::EmptyChain => "EMPTY_CHAIN",
@@ -359,18 +362,21 @@ pub fn verify_signed_checkpoint(
     let trusted_key = registry
         .get(&manifest.body.signer_id, &manifest.body.key_id)
         .ok_or(CheckpointError::UnknownKey)?;
-    if manifest.body.issued_at_ms < trusted_key.valid_from_ms {
+    if manifest.body.issued_at_ms > now_ms {
+        return Err(CheckpointError::CheckpointFromFuture);
+    }
+    if now_ms < trusted_key.valid_from_ms {
         return Err(CheckpointError::KeyNotYetValid);
     }
     if trusted_key
         .valid_until_ms
-        .is_some_and(|until| manifest.body.issued_at_ms > until)
+        .is_some_and(|until| now_ms > until)
     {
         return Err(CheckpointError::KeyExpired);
     }
     if trusted_key
         .revoked_at_ms
-        .is_some_and(|revoked| manifest.body.issued_at_ms >= revoked)
+        .is_some_and(|revoked| now_ms >= revoked)
     {
         return Err(CheckpointError::KeyRevoked);
     }
@@ -737,9 +743,26 @@ mod tests {
                 }
                 "revoked_key" => {
                     let checkpoint = signer(revoked)
-                        .sign(material(10, "head-10"), 200, Some(500), None)
+                        .sign(material(10, "head-10"), 100, Some(500), None)
                         .expect("sign");
                     verify_checkpoint_chain(&[checkpoint], &registry(&[revoked]), None, 250)
+                        .map(|_| "VERIFIED".to_owned())
+                        .unwrap_or_else(|error| error.code().to_owned())
+                }
+                "expired_key" => {
+                    let expired = key(&fixture, "expired");
+                    let checkpoint = signer(expired)
+                        .sign(material(10, "head-10"), 100, Some(500), None)
+                        .expect("sign");
+                    verify_checkpoint_chain(&[checkpoint], &registry(&[expired]), None, 250)
+                        .map(|_| "VERIFIED".to_owned())
+                        .unwrap_or_else(|error| error.code().to_owned())
+                }
+                "future_issued_checkpoint" => {
+                    let checkpoint = signer(trusted)
+                        .sign(material(10, "head-10"), 300, Some(500), None)
+                        .expect("sign");
+                    verify_checkpoint_chain(&[checkpoint], &registry(&[trusted]), None, 250)
                         .map(|_| "VERIFIED".to_owned())
                         .unwrap_or_else(|error| error.code().to_owned())
                 }

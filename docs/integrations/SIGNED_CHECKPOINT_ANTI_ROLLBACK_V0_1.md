@@ -113,13 +113,19 @@ revoked_at_ms
 ```
 
 Verification uses the key identified by the manifest's exact signer and key IDs.
-The checkpoint issuance time must fall inside the key validity interval and
-before revocation.
+Key activation, expiry, and revocation are evaluated at caller-trusted
+verification time (`now_ms`), not at issuer-selected `issued_at_ms`.
 
-Historical signatures issued before an effective revocation remain
-cryptographically verifiable under this v0.1 model. Deployments requiring
-retroactive distrust must remove the key from the trusted registry or publish a
-higher-level policy that rejects its historical checkpoints.
+`issued_at_ms` is signed declarative metadata. It must not be later than trusted
+verification time, but it does not by itself prove when the checkpoint existed
+or establish precedence in the outside world. This prevents a compromised key
+from bypassing expiry or revocation by backdating a newly signed checkpoint.
+
+Without an independently trusted timestamp or external receipt for each
+checkpoint, v0.1 fails closed: a key that is expired or revoked at verification
+time cannot validate historical checkpoints. A future profile may preserve
+historical verification by binding each checkpoint to an OTS, transparency-log,
+or equivalent provider receipt whose time the signer cannot choose.
 
 ## Key rotation
 
@@ -133,8 +139,10 @@ The new checkpoint must:
 - not move issuance time backwards;
 - contain a different event-chain head.
 
-Both old and new public keys must be present in the verifier's trusted registry
-for the complete historical chain to validate.
+Both old and new public keys must be present and active at trusted verification
+time for the complete chain to validate under v0.1. Preserving history after an
+old key expires or is revoked requires the future trusted-receipt profile
+described above.
 
 ## External anchor contract
 
@@ -193,11 +201,13 @@ The checked-in fixture covers:
 1. valid local signature;
 2. wrong signer;
 3. valid key rotation;
-4. revoked key;
-5. expired checkpoint;
-6. forked ledger head against an anchor;
-7. rollback to an older mutually consistent copy;
-8. valid descendant of an external anchor.
+4. backdated checkpoint from a revoked key;
+5. backdated checkpoint from an expired key;
+6. checkpoint claiming a future issuance time;
+7. expired checkpoint;
+8. forked ledger head against an anchor;
+9. rollback to an older mutually consistent copy;
+10. valid descendant of an external anchor.
 
 The ledger integration tests additionally cover:
 
@@ -237,6 +247,7 @@ It does not prove:
 - causal validity;
 - continuation safety;
 - signer operational security;
+- trusted issuance time or world-time precedence from `issued_at_ms` alone;
 - external anchor provider correctness;
 - distributed consensus.
 
