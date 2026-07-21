@@ -65,9 +65,7 @@ jobs:
 
           def resolve(path, builders):
               text = Path(path).read_text()
-              output = []
-              cursor = 0
-              index = 0
+              output, cursor, index = [], 0, 0
               while True:
                   start = text.find('<<<<<<< ours\n', cursor)
                   if start < 0:
@@ -76,12 +74,10 @@ jobs:
                   output.append(text[cursor:start])
                   middle = text.find('=======\n', start)
                   end = text.find('>>>>>>> theirs\n', middle)
-                  if middle < 0 or end < 0:
-                      raise SystemExit(f'malformed conflict in {path}')
+                  if middle < 0 or end < 0 or index >= len(builders):
+                      raise SystemExit(f'malformed or unexpected conflict in {path}')
                   ours = text[start + len('<<<<<<< ours\n'):middle]
                   theirs = text[middle + len('=======\n'):end]
-                  if index >= len(builders):
-                      raise SystemExit(f'unexpected conflict {index} in {path}')
                   output.append(builders[index](ours, theirs))
                   index += 1
                   cursor = end + len('>>>>>>> theirs\n')
@@ -91,43 +87,27 @@ jobs:
 
           keep_ours = lambda ours, theirs: ours
           keep_theirs = lambda ours, theirs: theirs
-
-          cargo_features = lambda ours, theirs: (
-              '[features]\n'
-              'default = []\n'
-              'durability-failpoints = []\n'
-              'durability-test-hooks = []\n'
-          )
-          resolve(
-              'liminal-db/crates/liminal-store/Cargo.toml',
-              [cargo_features, keep_ours],
-          )
-
-          resolve(
-              'liminal-db/crates/liminal-store/src/trustworthy_transition.rs',
-              [keep_theirs],
-          )
+          resolve('liminal-db/crates/liminal-store/Cargo.toml', [
+              lambda ours, theirs: '[features]\ndefault = []\ndurability-failpoints = []\ndurability-test-hooks = []\n',
+              keep_ours,
+          ])
+          resolve('liminal-db/crates/liminal-store/src/trustworthy_transition.rs', [keep_theirs])
 
           def wal_header(ours, theirs):
-              enum_start = ours.index('#[derive')
-              return (
-                  'use crate::durability::{crash_if, DurabilityFailpoint};\n\n'
-                  'const WAL_EXTENSION: &str = "wal";\n'
-                  'const DEFAULT_SEGMENT_SIZE: u64 = 32 * 1024 * 1024; // 32 MiB\n'
-                  'const WRITER_LOCK_FILE: &str = ".liminaldb-writer.lock";\n\n'
-                  + ours[enum_start:]
-              )
+              return ('use crate::durability::{crash_if, DurabilityFailpoint};\n\n'
+                      'const WAL_EXTENSION: &str = "wal";\n'
+                      'const DEFAULT_SEGMENT_SIZE: u64 = 32 * 1024 * 1024; // 32 MiB\n'
+                      'const WRITER_LOCK_FILE: &str = ".liminaldb-writer.lock";\n\n'
+                      + ours[ours.index('#[derive'):])
 
           def wal_open(ours, theirs):
-              return (
-                  '        create_dir_all_durable(&root)?;\n'
-                  '        let writer_lock = acquire_writer_lock(&root)?;\n'
-                  '        let data_dir = root.join("data");\n'
-                  '        let snap_dir = root.join("snap");\n'
-                  '        create_dir_all_durable(&data_dir)?;\n'
-                  '        create_dir_all_durable(&snap_dir)?;\n'
-                  '        let writer = WalWriter::open(&data_dir, rotation)?;\n'
-              )
+              return ('        create_dir_all_durable(&root)?;\n'
+                      '        let writer_lock = acquire_writer_lock(&root)?;\n'
+                      '        let data_dir = root.join("data");\n'
+                      '        let snap_dir = root.join("snap");\n'
+                      '        create_dir_all_durable(&data_dir)?;\n'
+                      '        create_dir_all_durable(&snap_dir)?;\n'
+                      '        let writer = WalWriter::open(&data_dir, rotation)?;\n')
 
           def wal_append(ours, theirs):
               return ours.rstrip() + '\n\n        crash_if(DurabilityFailpoint::AfterWalSyncBeforeReturn);\n'
@@ -148,22 +128,10 @@ jobs:
                   raise SystemExit('missing durability test tail')
               return ours.rstrip() + '\n' + theirs[tail:]
 
-          resolve(
-              'liminal-db/crates/liminal-store/src/wal.rs',
-              [
-                  wal_header,
-                  wal_open,
-                  wal_append,
-                  keep_ours,
-                  wal_writer_open,
-                  keep_ours,
-                  wal_rotate_create,
-                  keep_ours,
-                  keep_ours,
-                  keep_ours,
-                  wal_tests,
-              ],
-          )
+          resolve('liminal-db/crates/liminal-store/src/wal.rs', [
+              wal_header, wal_open, wal_append, keep_ours, wal_writer_open,
+              keep_ours, wal_rotate_create, keep_ours, keep_ours, keep_ours, wal_tests,
+          ])
           PY
             git add \
               liminal-db/crates/liminal-store/Cargo.toml \
@@ -174,25 +142,48 @@ jobs:
             liminal-db/crates/liminal-store/Cargo.toml \
             liminal-db/crates/liminal-store/src/trustworthy_transition.rs \
             liminal-db/crates/liminal-store/src/wal.rs; then
-            echo "Conflict markers remain."
             exit 1
           fi
           test -z "$(git diff --name-only --diff-filter=U)"
           git diff --check
 
       - name: Validate reconciled durability contract
+        id: validate
         run: |
-          set -euo pipefail
-          cargo fmt --manifest-path liminal-db/Cargo.toml --all
-          git diff --check
-          cd liminal-db
-          cargo check --locked -p liminal-store --features durability-failpoints
-          cargo test -q --locked -p liminal-store --features durability-failpoints --no-fail-fast
-          cd ..
-          python tools/run_transition_durability_matrix.py \
-            --output artifacts/transition-ledger-durability-bootstrap.json
+          mkdir -p artifacts
+          set +e
+          {
+            set -x
+            cargo fmt --manifest-path liminal-db/Cargo.toml --all
+            git diff --check
+            cd liminal-db
+            cargo check --locked -p liminal-store --features durability-failpoints
+            cargo test -q --locked -p liminal-store --features durability-failpoints --no-fail-fast
+            cd ..
+            python tools/run_transition_durability_matrix.py \
+              --output artifacts/transition-ledger-durability-bootstrap.json
+          } > artifacts/pr93-bootstrap-validation.log 2>&1
+          status=$?
+          set -e
+          echo "status=$status" >> "$GITHUB_OUTPUT"
+          tail -n 250 artifacts/pr93-bootstrap-validation.log
+          exit 0
+
+      - name: Upload validation failure
+        if: ${{ steps.validate.outputs.status != '0' }}
+        uses: actions/upload-artifact@v4
+        with:
+          name: pr93-bootstrap-validation-${{ github.run_id }}
+          path: artifacts/pr93-bootstrap-validation.log
+          if-no-files-found: error
+          retention-days: 7
+
+      - name: Stop on validation failure
+        if: ${{ steps.validate.outputs.status != '0' }}
+        run: exit 1
 
       - name: Commit validated reconciliation
+        if: ${{ steps.validate.outputs.status == '0' }}
         env:
           GH_TOKEN: ${{ github.token }}
         run: |
