@@ -45,10 +45,12 @@ jobs:
             tools/run_transition_durability_matrix.py
 
       - name: Apply modified-file durability delta with three-way merge
+        id: apply
         run: |
           set -euo pipefail
           archive=origin/archive/pr93-pre-main-reconcile-20260721
           base=2cac499c3b73c19d566ac763bf32816f4a4bcadc
+          mkdir -p artifacts
           git diff --binary "$base" "$archive" -- \
             liminal-db/crates/liminal-store/Cargo.toml \
             liminal-db/crates/liminal-store/src/lib.rs \
@@ -59,19 +61,41 @@ jobs:
           git apply --3way --index /tmp/pr93-modified.patch
           status=$?
           set -e
+          echo "status=$status" >> "$GITHUB_OUTPUT"
           if [[ "$status" -ne 0 ]]; then
-            echo "Three-way patch application failed."
-            git status --short
-            git diff --name-only --diff-filter=U
-            for path in $(git diff --name-only --diff-filter=U); do
-              echo "===== CONFLICT: $path ====="
-              grep -n -C 16 -E '^(<<<<<<<|=======|>>>>>>>)' "$path" || true
-            done
-            exit "$status"
+            {
+              echo "three_way_status=$status"
+              echo
+              echo "git_status:"
+              git status --short
+              echo
+              echo "conflicted_files:"
+              git diff --name-only --diff-filter=U
+              for path in $(git diff --name-only --diff-filter=U); do
+                echo
+                echo "===== CONFLICT: $path ====="
+                grep -n -C 24 -E '^(<<<<<<<|=======|>>>>>>>)' "$path" || true
+              done
+            } > artifacts/pr93-reconcile-conflicts.txt
+          else
+            git diff --check
           fi
-          git diff --check
+
+      - name: Upload reconcile conflict report
+        if: ${{ steps.apply.outputs.status != '0' }}
+        uses: actions/upload-artifact@v4
+        with:
+          name: pr93-reconcile-conflicts-${{ github.run_id }}
+          path: artifacts/pr93-reconcile-conflicts.txt
+          if-no-files-found: error
+          retention-days: 7
+
+      - name: Stop on reconcile conflict
+        if: ${{ steps.apply.outputs.status != '0' }}
+        run: exit 1
 
       - name: Validate reconciled durability contract
+        if: ${{ steps.apply.outputs.status == '0' }}
         run: |
           set -euo pipefail
           cargo fmt --manifest-path liminal-db/Cargo.toml --all -- --check
@@ -83,6 +107,7 @@ jobs:
             --output artifacts/transition-ledger-durability-bootstrap.json
 
       - name: Commit validated reconciliation
+        if: ${{ steps.apply.outputs.status == '0' }}
         env:
           GH_TOKEN: ${{ github.token }}
         run: |
