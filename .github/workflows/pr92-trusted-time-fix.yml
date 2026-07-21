@@ -283,3 +283,5 @@ described above.
           git commit -m "fix: bind checkpoint key lifecycle to trusted time"
           git remote set-url origin "https://x-access-token:${GH_TOKEN}@github.com/${GITHUB_REPOSITORY}.git"
           git push origin HEAD:feat/checkpoint-anchors-v0-1
+
+# Triggered after the workflow file became part of the pull-request head.
