@@ -3,10 +3,9 @@ use std::fs;
 
 use crc32fast::Hasher as Crc32;
 use liminal_store::{
-    sha256_ref, AuthorityState, CausalValidityState, ContinuityPosture, ExecutionState,
-    Offset, ResponseIntegrityState, Store, TransitionDimensions, TransitionEvent,
-    TransitionEventInput, TransitionLedgerError, TransitionLinks, TransitionRecordKind,
-    TrustworthyTransitionLedger,
+    sha256_ref, AuthorityState, CausalValidityState, ContinuityPosture, ExecutionState, Offset,
+    ResponseIntegrityState, Store, TransitionDimensions, TransitionEvent, TransitionEventInput,
+    TransitionLedgerError, TransitionLinks, TransitionRecordKind, TrustworthyTransitionLedger,
 };
 use serde_cbor::Value as CborValue;
 use serde_json::Value;
@@ -344,8 +343,11 @@ fn execute_case(case_id: &str) -> Result<&'static str, &'static str> {
                 CborValue::Text("snapshot_digest".to_owned()),
                 CborValue::Text(reference("tampered-snapshot")),
             );
-            fs::write(&snapshot_path, serde_cbor::to_vec(&value).expect("encode snapshot"))
-                .expect("write snapshot");
+            fs::write(
+                &snapshot_path,
+                serde_cbor::to_vec(&value).expect("encode snapshot"),
+            )
+            .expect("write snapshot");
             let error = TrustworthyTransitionLedger::open(root.path())
                 .err()
                 .expect("tampered snapshot must fail");
@@ -515,7 +517,10 @@ fn observation_growth_invalidates_all_derived_current_evidence() {
         "stale-continuity",
         TransitionLinks {
             authorization_ref: Some(authorization.body.record_ref.clone()),
-            observation_refs: vec![chain[1].body.record_ref.clone(), second_observation.body.record_ref],
+            observation_refs: vec![
+                chain[1].body.record_ref.clone(),
+                second_observation.body.record_ref,
+            ],
             response_integrity_ref: Some(integrity.body.record_ref.clone()),
             causal_audit_ref: Some(causal.body.record_ref.clone()),
             previous_continuity_ref: Some(continuity.body.record_ref.clone()),
@@ -524,6 +529,8 @@ fn observation_growth_invalidates_all_derived_current_evidence() {
     stale_continuity.dimensions = Some(dimensions(ExecutionState::ObservedExecuted));
     assert!(matches!(
         ledger.append(stale_continuity),
-        Err(TransitionLedgerError::ParentMismatch("response_integrity_ref"))
+        Err(TransitionLedgerError::ParentMismatch(
+            "response_integrity_ref"
+        ))
     ));
 }
