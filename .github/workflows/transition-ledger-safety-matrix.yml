@@ -78,6 +78,10 @@ jobs:
         if: ${{ steps.fixture.outputs.status != '0' }}
         run: exit 1
 
+      - name: Exercise append fault boundaries
+        if: ${{ steps.fixture.outputs.status == '0' }}
+        run: cargo test -p liminal-store --features durability-test-hooks --test trustworthy_transition_fault_injection
+
       - name: Run ledger unit and restart tests
         if: ${{ steps.fixture.outputs.status == '0' }}
         run: cargo test -p liminal-store trustworthy_transition
