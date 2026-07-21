@@ -1,5 +1,8 @@
 #![cfg(feature = "durability-test-hooks")]
 
+use std::fs::OpenOptions;
+use std::io::Write;
+
 use liminal_store::{
     set_append_failpoint_for_test, sha256_ref, AppendFailpoint, TransitionEventInput,
     TransitionLedgerError, TransitionLinks, TransitionRecordKind, TrustworthyTransitionLedger,
@@ -83,4 +86,32 @@ fn append_failpoint_is_thread_local() {
 
     let recovered = TrustworthyTransitionLedger::open(root.path()).expect("reopen");
     assert_eq!(recovered.event_count(), 1);
+}
+
+#[test]
+fn ambiguous_partial_payload_fails_closed_on_reopen() {
+    let root = tempdir().expect("tempdir");
+    {
+        let mut ledger = TrustworthyTransitionLedger::open(root.path()).expect("open");
+        ledger
+            .append(authorization("durable-before-partial-tail"))
+            .expect("durable event");
+    }
+
+    let wal_path = root.path().join("data/00000001.wal");
+    let mut wal = OpenOptions::new()
+        .append(true)
+        .open(&wal_path)
+        .expect("open WAL tail");
+    wal.write_all(&32_u32.to_le_bytes())
+        .expect("write declared payload length");
+    wal.write_all(b"partial")
+        .expect("write ambiguous payload prefix");
+    wal.flush().expect("flush ambiguous tail");
+    drop(wal);
+
+    let error = TrustworthyTransitionLedger::open(root.path())
+        .err()
+        .expect("ambiguous partial payload must fail closed");
+    assert!(matches!(error, TransitionLedgerError::Storage(_)));
 }
