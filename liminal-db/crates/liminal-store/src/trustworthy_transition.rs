@@ -1,5 +1,5 @@
 use std::collections::{BTreeMap, BTreeSet};
-use std::fs::{self, File, OpenOptions};
+use std::fs::{self, OpenOptions};
 use std::io::Write;
 use std::path::{Path, PathBuf};
 
@@ -962,9 +962,7 @@ fn atomic_write(path: &Path, bytes: &[u8]) -> Result<(), TransitionLedgerError> 
         file.sync_all().map_err(storage_error)?;
     }
     fs::rename(&temporary, path).map_err(storage_error)?;
-    File::open(parent)
-        .and_then(|directory| directory.sync_all())
-        .map_err(storage_error)?;
+    crate::wal::sync_directory(parent).map_err(storage_error)?;
     Ok(())
 }
 
