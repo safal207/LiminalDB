@@ -78,9 +78,17 @@ jobs:
         if: ${{ steps.fixture.outputs.status != '0' }}
         run: exit 1
 
-      - name: Exercise append fault boundaries
+      - name: Exercise append storage phases
         if: ${{ steps.fixture.outputs.status == '0' }}
-        run: cargo test -p liminal-store --features durability-test-hooks --test trustworthy_transition_fault_injection
+        run: cargo test -p liminal-store --features durability-test-hooks --test trustworthy_transition_fault_injection append_failures_poison_until_reopen_and_replay -- --nocapture
+
+      - name: Verify failpoint thread isolation
+        if: ${{ steps.fixture.outputs.status == '0' }}
+        run: cargo test -p liminal-store --features durability-test-hooks --test trustworthy_transition_fault_injection append_failpoint_is_thread_local -- --nocapture
+
+      - name: Reject ambiguous partial payload
+        if: ${{ steps.fixture.outputs.status == '0' }}
+        run: cargo test -p liminal-store --features durability-test-hooks --test trustworthy_transition_fault_injection ambiguous_partial_payload_fails_closed_on_reopen -- --nocapture
 
       - name: Run ledger unit and restart tests
         if: ${{ steps.fixture.outputs.status == '0' }}
