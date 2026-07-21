@@ -13,12 +13,6 @@ def patch_wal() -> None:
     text = path.read_text()
     text = replace_once(
         text,
-        "use anyhow::{anyhow, Context, Result};",
-        "use anyhow::{Context, Result};",
-        "remove obsolete anyhow macro import",
-    )
-    text = replace_once(
-        text,
         """    pub fn append(&mut self, bytes: &[u8]) -> Result<Offset> {
         self.writer.append(bytes)
     }
