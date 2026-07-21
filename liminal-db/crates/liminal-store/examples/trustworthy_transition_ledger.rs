@@ -25,7 +25,11 @@ fn dimensions(
     }
 }
 
-fn event(kind: TransitionRecordKind, label: &str, links: TransitionLinks) -> TransitionEventInput {
+fn event(
+    kind: TransitionRecordKind,
+    label: &str,
+    links: TransitionLinks,
+) -> TransitionEventInput {
     TransitionEventInput {
         transition_id: "demo-transition-001".into(),
         subject_id: "agent:reporter".into(),
