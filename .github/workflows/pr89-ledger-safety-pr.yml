@@ -24,6 +24,7 @@ jobs:
         with:
           ref: ${{ github.head_ref }}
           fetch-depth: 0
+          show-progress: false
           persist-credentials: false
 
       - name: Apply bounded fix
@@ -39,13 +40,20 @@ jobs:
           cargo fmt --manifest-path liminal-db/Cargo.toml --all
           echo "skip=false" >> "$GITHUB_OUTPUT"
 
-      - name: Validate liminal-store
+      - name: Compile liminal-store
         if: ${{ steps.patch.outputs.skip != 'true' }}
         working-directory: liminal-db
-        run: |
-          cargo check -p liminal-store
-          cargo test -p liminal-store --test trustworthy_transition_fixture
-          cargo test -p liminal-store trustworthy_transition
+        run: cargo check -p liminal-store
+
+      - name: Execute trustworthy-transition fixture
+        if: ${{ steps.patch.outputs.skip != 'true' }}
+        working-directory: liminal-db
+        run: cargo test -p liminal-store --test trustworthy_transition_fixture -- --nocapture
+
+      - name: Run existing trustworthy-transition tests
+        if: ${{ steps.patch.outputs.skip != 'true' }}
+        working-directory: liminal-db
+        run: cargo test -p liminal-store trustworthy_transition -- --nocapture
 
       - name: Commit validated production fixes
         if: ${{ steps.patch.outputs.skip != 'true' }}
