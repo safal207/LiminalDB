@@ -1,0 +1,19 @@
+# yaml-language-server: $schema=https://coderabbit.ai/integrations/schema.v2.json
+# Automatic CodeRabbit activity is disabled for this repository.
+# Manual review remains available with: @coderabbitai review
+reviews:
+  auto_review:
+    enabled: false
+    auto_incremental_review: false
+    drafts: false
+    labels: []
+    description_keyword: ""
+  slop_detection:
+    enabled: false
+
+issue_enrichment:
+  auto_enrich:
+    enabled: false
+
+chat:
+  auto_reply: false

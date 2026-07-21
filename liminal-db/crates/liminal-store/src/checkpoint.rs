@@ -568,10 +568,6 @@ fn canonical_bytes<T: Serialize>(value: &T) -> Result<Vec<u8>, CheckpointError> 
     serde_cbor::to_vec(value).map_err(|error| CheckpointError::Encoding(error.to_string()))
 }
 
-fn digest_cbor<T: Serialize>(value: &T) -> Result<String, CheckpointError> {
-    Ok(sha256_ref(&canonical_bytes(value)?))
-}
-
 fn key_slot(signer_id: &str, key_id: &str) -> String {
     format!("{signer_id}\0{key_id}")
 }

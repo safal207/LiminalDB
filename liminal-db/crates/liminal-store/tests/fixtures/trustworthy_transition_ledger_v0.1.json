@@ -19,6 +19,11 @@
       "expected_error": "PARENT_MISMATCH"
     },
     {
+      "case_id": "missing_parent_reference",
+      "mutation": "observation references an authorization record that does not exist",
+      "expected_error": "MISSING_PARENT"
+    },
+    {
       "case_id": "missing_observation_from_integrity_set",
       "mutation": "response integrity omits a recorded observation",
       "expected_error": "OBSERVATION_SET_MISMATCH"
@@ -56,6 +61,11 @@
     {
       "case_id": "snapshot_tail_equals_full_replay",
       "mutation": "append an observation after snapshot and restart",
+      "expected": "RECOVERED"
+    },
+    {
+      "case_id": "wal_rotation_round_trip",
+      "mutation": "append enough framed records to rotate the WAL and replay every record",
       "expected": "RECOVERED"
     }
   ]

@@ -1,5 +1,5 @@
 use std::collections::{BTreeMap, BTreeSet};
-use std::fs::{self, File, OpenOptions};
+use std::fs::{self, OpenOptions};
 use std::io::Write;
 use std::path::{Path, PathBuf};
 
@@ -303,12 +303,17 @@ pub enum TransitionLedgerError {
     ContinuityDimensionsRequired,
     #[error("invalid links for record kind {0:?}")]
     InvalidLinks(TransitionRecordKind),
+    #[error(
+        "ledger is poisoned after an ambiguous storage failure; reopen and replay before appending"
+    )]
+    PoisonedAfterStorageFailure,
 }
 
 pub struct TrustworthyTransitionLedger {
     store: Store,
     state: LedgerState,
     snapshot_path: PathBuf,
+    poisoned: bool,
 }
 
 impl TrustworthyTransitionLedger {
@@ -340,6 +345,7 @@ impl TrustworthyTransitionLedger {
             store,
             state: full_replay,
             snapshot_path,
+            poisoned: false,
         })
     }
 
@@ -350,6 +356,9 @@ impl TrustworthyTransitionLedger {
         &mut self,
         input: TransitionEventInput,
     ) -> Result<TransitionEvent, TransitionLedgerError> {
+        if self.poisoned {
+            return Err(TransitionLedgerError::PoisonedAfterStorageFailure);
+        }
         let normalized = normalize_input(input)?;
         let body = TransitionEventBody {
             schema: EVENT_SCHEMA.to_owned(),
@@ -372,8 +381,10 @@ impl TrustworthyTransitionLedger {
         let mut candidate = self.state.clone();
         apply_event(&mut candidate, &event)?;
         let bytes = serde_cbor::to_vec(&event).map_err(encoding_error)?;
-        self.store.append(&bytes).map_err(storage_error)?;
-        sync_current_wal(&self.store)?;
+        if let Err(error) = self.store.append(&bytes) {
+            self.poisoned = true;
+            return Err(storage_error(error));
+        }
         self.state = candidate;
         Ok(event)
     }
@@ -480,6 +491,45 @@ fn normalize_input(
     Ok(input)
 }
 
+fn validate_event_body(body: &TransitionEventBody) -> Result<(), TransitionLedgerError> {
+    validate_canonical_identifier(&body.transition_id, "transition_id")?;
+    validate_canonical_identifier(&body.subject_id, "subject_id")?;
+    validate_ref(&body.record_ref, "record_ref")?;
+    validate_ref(&body.payload_digest, "payload_digest")?;
+    validate_optional_ref(&body.links.authorization_ref, "authorization_ref")?;
+    validate_optional_ref(&body.links.response_integrity_ref, "response_integrity_ref")?;
+    validate_optional_ref(&body.links.causal_audit_ref, "causal_audit_ref")?;
+    validate_optional_ref(
+        &body.links.previous_continuity_ref,
+        "previous_continuity_ref",
+    )?;
+    validate_optional_ref(&body.previous_event_hash, "previous_event_hash")?;
+    for reference in &body.links.observation_refs {
+        validate_ref(reference, "observation_ref")?;
+    }
+    let mut canonical_observations = body.links.observation_refs.clone();
+    canonical_observations.sort();
+    canonical_observations.dedup();
+    if canonical_observations != body.links.observation_refs {
+        return Err(TransitionLedgerError::InvalidLinks(body.kind));
+    }
+    if body.kind == TransitionRecordKind::ContinuitySnapshot && body.dimensions.is_none() {
+        return Err(TransitionLedgerError::ContinuityDimensionsRequired);
+    }
+    Ok(())
+}
+
+fn validate_canonical_identifier(
+    value: &str,
+    label: &'static str,
+) -> Result<(), TransitionLedgerError> {
+    let trimmed = value.trim();
+    if trimmed.is_empty() || trimmed != value {
+        return Err(TransitionLedgerError::InvalidIdentifier(label));
+    }
+    Ok(())
+}
+
 fn non_empty(value: String, label: &'static str) -> Result<String, TransitionLedgerError> {
     let normalized = value.trim().to_owned();
     if normalized.is_empty() {
@@ -529,6 +579,7 @@ fn apply_event(
     state: &mut LedgerState,
     event: &TransitionEvent,
 ) -> Result<(), TransitionLedgerError> {
+    validate_event_body(&event.body)?;
     if event.body.schema != EVENT_SCHEMA || event.body.profile != PROFILE {
         return Err(TransitionLedgerError::EventProfileMismatch);
     }
@@ -760,6 +811,9 @@ fn apply_dependent_record(
                 .push(event.body.record_ref.clone());
             projection.observation_refs.sort();
             projection.observation_refs.dedup();
+            projection.response_integrity_ref = None;
+            projection.causal_audit_ref = None;
+            projection.continuity_snapshot_ref = None;
         }
         TransitionRecordKind::ResponseIntegrity => {
             projection.response_integrity_ref = Some(event.body.record_ref.clone());
@@ -817,6 +871,11 @@ fn expect_optional_ref(
     label: &'static str,
     event: &TransitionEvent,
 ) -> Result<(), TransitionLedgerError> {
+    if let Some(reference) = actual {
+        if !state.record_owners.contains_key(reference) {
+            return Err(TransitionLedgerError::MissingParent(reference.clone()));
+        }
+    }
     if actual != expected {
         return Err(TransitionLedgerError::ParentMismatch(label));
     }
@@ -933,22 +992,8 @@ fn atomic_write(path: &Path, bytes: &[u8]) -> Result<(), TransitionLedgerError> 
         file.sync_all().map_err(storage_error)?;
     }
     fs::rename(&temporary, path).map_err(storage_error)?;
-    File::open(parent)
-        .and_then(|directory| directory.sync_all())
-        .map_err(storage_error)?;
+    crate::wal::sync_directory(parent).map_err(storage_error)?;
     Ok(())
-}
-
-fn sync_current_wal(store: &Store) -> Result<(), TransitionLedgerError> {
-    let path = store
-        .wal_dir()
-        .join(format!("{:08}.wal", store.current_segment()));
-    OpenOptions::new()
-        .read(true)
-        .write(true)
-        .open(path)
-        .and_then(|file| file.sync_all())
-        .map_err(storage_error)
 }
 
 fn storage_error(error: impl std::fmt::Display) -> TransitionLedgerError {
@@ -1404,8 +1449,7 @@ mod tests {
         let mut raw_store = Store::open(directory.path()).expect("raw store");
         raw_store
             .append(&serde_cbor::to_vec(&event).expect("encode event"))
-            .expect("append bad semantic event");
-        sync_current_wal(&raw_store).expect("sync");
+            .expect("append and sync bad semantic event");
         drop(raw_store);
 
         let error = TrustworthyTransitionLedger::open(directory.path())
