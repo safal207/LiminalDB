@@ -3,8 +3,9 @@ name: PR89 Ledger Safety PR
 on:
   pull_request:
     branches:
+      - main
       - feat/trustworthy-transition-ledger-v0.1
-    types: [opened, synchronize, reopened]
+    types: [opened, synchronize, reopened, edited]
 
 permissions:
   contents: write
@@ -35,11 +36,12 @@ jobs:
             exit 0
           fi
           python3 tools/apply_pr89_safety_fix.py
-          cargo fmt --all
+          cargo fmt --manifest-path liminal-db/Cargo.toml --all
           echo "skip=false" >> "$GITHUB_OUTPUT"
 
       - name: Validate liminal-store
         if: ${{ steps.patch.outputs.skip != 'true' }}
+        working-directory: liminal-db
         run: |
           cargo check -p liminal-store
           cargo test -p liminal-store --test trustworthy_transition_fixture
