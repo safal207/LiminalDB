@@ -17,9 +17,18 @@ FAILPOINTS = (
     "snapshot_after_rename_before_directory_sync",
 )
 RECEIPT_PREFIX = "VERIFIED_NEGATIVE_CRASH_RECEIPT="
+EXPECTED_TRANSITION_ID = "airbnb-garden-29702510829"
+EXPECTED_CONTINUITY_REF = (
+    "sha256:200e0076823c241cdb05db79fce50ad51bef01f4f0456e8fa2ebd93ae2809619"
+)
 
 
-def run(command: list[str], *, cwd: Path, env: dict[str, str] | None = None) -> subprocess.CompletedProcess[str]:
+def run(
+    command: list[str],
+    *,
+    cwd: Path,
+    env: dict[str, str] | None = None,
+) -> subprocess.CompletedProcess[str]:
     return subprocess.run(
         command,
         cwd=cwd,
@@ -41,6 +50,14 @@ def parse_receipt(output: str) -> dict[str, object]:
     if len(lines) != 1:
         raise RuntimeError(f"expected one crash receipt, found {len(lines)}:\n{output}")
     receipt = json.loads(lines[0][len(RECEIPT_PREFIX) :])
+    if receipt.get("transition_id") != EXPECTED_TRANSITION_ID:
+        raise RuntimeError(
+            f"transition identity mismatch: {receipt.get('transition_id')!r}"
+        )
+    if receipt.get("continuity_ref") != EXPECTED_CONTINUITY_REF:
+        raise RuntimeError(
+            f"continuity identity mismatch: {receipt.get('continuity_ref')!r}"
+        )
     if receipt.get("event_count") != 6:
         raise RuntimeError("recovered event count is not six")
     if receipt.get("recovered") is not True:
@@ -105,7 +122,9 @@ def main() -> int:
 
     cases: list[dict[str, object]] = []
     for failpoint in FAILPOINTS:
-        with tempfile.TemporaryDirectory(prefix=f"liminaldb-negative-{failpoint}-") as temporary:
+        with tempfile.TemporaryDirectory(
+            prefix=f"liminaldb-negative-{failpoint}-"
+        ) as temporary:
             root = Path(temporary) / "ledger"
             marker = Path(temporary) / "failpoint.marker"
 
@@ -122,9 +141,13 @@ def main() -> int:
             )
             if crashed.returncode != 86:
                 raise RuntimeError(
-                    f"{failpoint} returned {crashed.returncode}, expected 86:\n{crashed.stdout}"
+                    f"{failpoint} returned {crashed.returncode}, expected 86:\n"
+                    f"{crashed.stdout}"
                 )
-            if not marker.is_file() or marker.read_text(encoding="utf-8").strip() != failpoint:
+            if (
+                not marker.is_file()
+                or marker.read_text(encoding="utf-8").strip() != failpoint
+            ):
                 raise RuntimeError(f"{failpoint} marker was not durably recorded")
 
             inspected = run([str(inspector), str(root)], cwd=workspace)
@@ -148,7 +171,10 @@ def main() -> int:
         "cases": cases,
     }
     args.output.parent.mkdir(parents=True, exist_ok=True)
-    args.output.write_text(json.dumps(summary, indent=2, sort_keys=True) + "\n", encoding="utf-8")
+    args.output.write_text(
+        json.dumps(summary, indent=2, sort_keys=True) + "\n",
+        encoding="utf-8",
+    )
     print(json.dumps(summary, indent=2, sort_keys=True))
     return 0
 
