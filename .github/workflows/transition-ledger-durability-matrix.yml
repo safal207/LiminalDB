@@ -1,0 +1,53 @@
+name: Transition Ledger Durability Matrix
+
+on:
+  pull_request:
+    paths:
+      - "liminal-db/crates/liminal-store/src/durability.rs"
+      - "liminal-db/crates/liminal-store/src/snapshot_durability.rs"
+      - "liminal-db/crates/liminal-store/src/wal.rs"
+      - "liminal-db/crates/liminal-store/src/lib.rs"
+      - "liminal-db/crates/liminal-store/Cargo.toml"
+      - "liminal-db/crates/liminal-store/examples/durability_crash_harness.rs"
+      - "tools/run_transition_durability_matrix.py"
+      - "docs/integrations/TRANSITION_LEDGER_DURABILITY_MATRIX_V0_1.md"
+      - ".github/workflows/transition-ledger-durability-matrix.yml"
+  workflow_dispatch:
+
+permissions:
+  contents: read
+
+jobs:
+  durability:
+    strategy:
+      fail-fast: false
+      matrix:
+        os: [ubuntu-latest, windows-latest, macos-latest]
+    runs-on: ${{ matrix.os }}
+    steps:
+      - uses: actions/checkout@v4
+        with:
+          persist-credentials: false
+
+      - uses: dtolnay/rust-toolchain@stable
+
+      - uses: Swatinem/rust-cache@v2
+        with:
+          workspaces: liminal-db
+
+      - name: Test durability APIs
+        working-directory: liminal-db
+        run: cargo test -q --locked -p liminal-store --features durability-failpoints --no-fail-fast
+
+      - name: Run process-crash durability matrix
+        run: >-
+          python tools/run_transition_durability_matrix.py
+          --output artifacts/transition-ledger-durability-${{ matrix.os }}.json
+
+      - name: Upload durability evidence
+        uses: actions/upload-artifact@v4
+        with:
+          name: transition-ledger-durability-${{ matrix.os }}
+          path: artifacts/transition-ledger-durability-${{ matrix.os }}.json
+          if-no-files-found: error
+          retention-days: 14
