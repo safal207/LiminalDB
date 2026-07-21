@@ -1,0 +1,285 @@
+name: PR92 Trusted Time Fix
+
+on:
+  pull_request:
+    branches:
+      - main
+    types: [opened, synchronize, reopened]
+    paths:
+      - '.github/workflows/pr92-trusted-time-fix.yml'
+
+permissions:
+  contents: write
+
+concurrency:
+  group: pr92-trusted-time-fix-${{ github.event.pull_request.number }}
+  cancel-in-progress: false
+
+jobs:
+  patch-validate-push:
+    if: ${{ github.head_ref == 'feat/checkpoint-anchors-v0-1' }}
+    runs-on: ubuntu-latest
+    steps:
+      - name: Checkout exact branch head
+        uses: actions/checkout@v4
+        with:
+          ref: feat/checkpoint-anchors-v0-1
+          fetch-depth: 0
+          persist-credentials: false
+
+      - name: Apply trusted-time lifecycle fix
+        run: |
+          set -euo pipefail
+          python3 - <<'PY'
+          import json
+          from pathlib import Path
+
+          checkpoint_path = Path('liminal-db/crates/liminal-store/src/checkpoint.rs')
+          checkpoint = checkpoint_path.read_text()
+
+          replacements = [
+              (
+                  '''    #[error("checkpoint key is not valid yet")]
+    KeyNotYetValid,
+    #[error("checkpoint key was expired at issuance")]
+    KeyExpired,
+    #[error("checkpoint key was revoked at issuance")]
+    KeyRevoked,
+    #[error("checkpoint was expired at verification time")]
+''',
+                  '''    #[error("checkpoint key is not valid at trusted verification time")]
+    KeyNotYetValid,
+    #[error("checkpoint key is expired at trusted verification time")]
+    KeyExpired,
+    #[error("checkpoint key is revoked at trusted verification time")]
+    KeyRevoked,
+    #[error("checkpoint issuance time is later than trusted verification time")]
+    CheckpointFromFuture,
+    #[error("checkpoint was expired at verification time")]
+'''
+              ),
+              (
+                  '''            Self::KeyExpired => "KEY_EXPIRED",
+            Self::KeyRevoked => "KEY_REVOKED",
+            Self::CheckpointExpired => "CHECKPOINT_EXPIRED",
+''',
+                  '''            Self::KeyExpired => "KEY_EXPIRED",
+            Self::KeyRevoked => "KEY_REVOKED",
+            Self::CheckpointFromFuture => "CHECKPOINT_FROM_FUTURE",
+            Self::CheckpointExpired => "CHECKPOINT_EXPIRED",
+'''
+              ),
+              (
+                  '''    if manifest.body.issued_at_ms < trusted_key.valid_from_ms {
+        return Err(CheckpointError::KeyNotYetValid);
+    }
+    if trusted_key
+        .valid_until_ms
+        .is_some_and(|until| manifest.body.issued_at_ms > until)
+    {
+        return Err(CheckpointError::KeyExpired);
+    }
+    if trusted_key
+        .revoked_at_ms
+        .is_some_and(|revoked| manifest.body.issued_at_ms >= revoked)
+    {
+        return Err(CheckpointError::KeyRevoked);
+    }
+''',
+                  '''    if manifest.body.issued_at_ms > now_ms {
+        return Err(CheckpointError::CheckpointFromFuture);
+    }
+    if now_ms < trusted_key.valid_from_ms {
+        return Err(CheckpointError::KeyNotYetValid);
+    }
+    if trusted_key
+        .valid_until_ms
+        .is_some_and(|until| now_ms > until)
+    {
+        return Err(CheckpointError::KeyExpired);
+    }
+    if trusted_key
+        .revoked_at_ms
+        .is_some_and(|revoked| now_ms >= revoked)
+    {
+        return Err(CheckpointError::KeyRevoked);
+    }
+'''
+              ),
+              (
+                  '''                "revoked_key" => {
+                    let checkpoint = signer(revoked)
+                        .sign(material(10, "head-10"), 200, Some(500), None)
+                        .expect("sign");
+                    verify_checkpoint_chain(&[checkpoint], &registry(&[revoked]), None, 250)
+                        .map(|_| "VERIFIED".to_owned())
+                        .unwrap_or_else(|error| error.code().to_owned())
+                }
+                "stale_checkpoint" => {
+''',
+                  '''                "revoked_key" => {
+                    let checkpoint = signer(revoked)
+                        .sign(material(10, "head-10"), 100, Some(500), None)
+                        .expect("sign");
+                    verify_checkpoint_chain(&[checkpoint], &registry(&[revoked]), None, 250)
+                        .map(|_| "VERIFIED".to_owned())
+                        .unwrap_or_else(|error| error.code().to_owned())
+                }
+                "expired_key" => {
+                    let expired = key(&fixture, "expired");
+                    let checkpoint = signer(expired)
+                        .sign(material(10, "head-10"), 100, Some(500), None)
+                        .expect("sign");
+                    verify_checkpoint_chain(&[checkpoint], &registry(&[expired]), None, 250)
+                        .map(|_| "VERIFIED".to_owned())
+                        .unwrap_or_else(|error| error.code().to_owned())
+                }
+                "future_issued_checkpoint" => {
+                    let checkpoint = signer(trusted)
+                        .sign(material(10, "head-10"), 300, Some(500), None)
+                        .expect("sign");
+                    verify_checkpoint_chain(&[checkpoint], &registry(&[trusted]), None, 250)
+                        .map(|_| "VERIFIED".to_owned())
+                        .unwrap_or_else(|error| error.code().to_owned())
+                }
+                "stale_checkpoint" => {
+'''
+              ),
+          ]
+
+          for old, new in replacements:
+              count = checkpoint.count(old)
+              if count != 1:
+                  raise SystemExit(f'checkpoint replacement expected one match, found {count}: {old[:80]!r}')
+              checkpoint = checkpoint.replace(old, new, 1)
+          checkpoint_path.write_text(checkpoint)
+
+          fixture_path = Path('liminal-db/crates/liminal-store/tests/fixtures/signed-checkpoint-anti-rollback-v0.1.json')
+          fixture = json.loads(fixture_path.read_text())
+          trusted_old = next(item for item in fixture['keys'] if item['name'] == 'trusted-old')
+          trusted_old['valid_until_ms'] = 500
+          if not any(item['name'] == 'expired' for item in fixture['keys']):
+              fixture['keys'].insert(3, {
+                  'name': 'expired',
+                  'signer_id': 'operator:primary',
+                  'key_id': 'test-key-expired',
+                  'seed_hex': '0505050505050505050505050505050505050505050505050505050505050505',
+                  'valid_from_ms': 0,
+                  'valid_until_ms': 150,
+                  'revoked_at_ms': None,
+              })
+          case_ids = {case['case_id'] for case in fixture['cases']}
+          if 'expired_key_rejected_at_trusted_time' not in case_ids:
+              insert_at = next(i for i, case in enumerate(fixture['cases']) if case['scenario'] == 'stale_checkpoint')
+              fixture['cases'][insert_at:insert_at] = [
+                  {
+                      'case_id': 'expired_key_rejected_at_trusted_time',
+                      'scenario': 'expired_key',
+                      'expected': 'KEY_EXPIRED',
+                  },
+                  {
+                      'case_id': 'future_issued_checkpoint_rejected',
+                      'scenario': 'future_issued_checkpoint',
+                      'expected': 'CHECKPOINT_FROM_FUTURE',
+                  },
+              ]
+          fixture_path.write_text(json.dumps(fixture, separators=(',', ':')) + '\n')
+
+          docs_path = Path('docs/integrations/SIGNED_CHECKPOINT_ANTI_ROLLBACK_V0_1.md')
+          docs = docs_path.read_text()
+          old = '''Verification uses the key identified by the manifest's exact signer and key IDs.
+The checkpoint issuance time must fall inside the key validity interval and
+before revocation.
+
+Historical signatures issued before an effective revocation remain
+cryptographically verifiable under this v0.1 model. Deployments requiring
+retroactive distrust must remove the key from the trusted registry or publish a
+higher-level policy that rejects its historical checkpoints.
+'''
+          new = '''Verification uses the key identified by the manifest's exact signer and key IDs.
+Key activation, expiry, and revocation are evaluated at caller-trusted
+verification time (`now_ms`), not at issuer-selected `issued_at_ms`.
+
+`issued_at_ms` is signed declarative metadata. It must not be later than trusted
+verification time, but it does not by itself prove when the checkpoint existed
+or establish precedence in the outside world. This prevents a compromised key
+from bypassing expiry or revocation by backdating a newly signed checkpoint.
+
+Without an independently trusted timestamp or external receipt for each
+checkpoint, v0.1 fails closed: a key that is expired or revoked at verification
+time cannot validate historical checkpoints. A future profile may preserve
+historical verification by binding each checkpoint to an OTS, transparency-log,
+or equivalent provider receipt whose time the signer cannot choose.
+'''
+          if docs.count(old) != 1:
+              raise SystemExit(f'docs lifecycle replacement expected one match, found {docs.count(old)}')
+          docs = docs.replace(old, new, 1)
+
+          old = '''Both old and new public keys must be present in the verifier's trusted registry
+for the complete historical chain to validate.
+'''
+          new = '''Both old and new public keys must be present and active at trusted verification
+time for the complete chain to validate under v0.1. Preserving history after an
+old key expires or is revoked requires the future trusted-receipt profile
+described above.
+'''
+          if docs.count(old) != 1:
+              raise SystemExit(f'docs rotation replacement expected one match, found {docs.count(old)}')
+          docs = docs.replace(old, new, 1)
+
+          old = '''4. revoked key;
+5. expired checkpoint;
+6. forked ledger head against an anchor;
+7. rollback to an older mutually consistent copy;
+8. valid descendant of an external anchor.
+'''
+          new = '''4. backdated checkpoint from a revoked key;
+5. backdated checkpoint from an expired key;
+6. checkpoint claiming a future issuance time;
+7. expired checkpoint;
+8. forked ledger head against an anchor;
+9. rollback to an older mutually consistent copy;
+10. valid descendant of an external anchor.
+'''
+          if docs.count(old) != 1:
+              raise SystemExit(f'docs coverage replacement expected one match, found {docs.count(old)}')
+          docs = docs.replace(old, new, 1)
+
+          old = '''- signer operational security;
+- external anchor provider correctness;
+- distributed consensus.
+'''
+          new = '''- signer operational security;
+- trusted issuance time or world-time precedence from `issued_at_ms` alone;
+- external anchor provider correctness;
+- distributed consensus.
+'''
+          if docs.count(old) != 1:
+              raise SystemExit(f'docs boundary replacement expected one match, found {docs.count(old)}')
+          docs_path.write_text(docs)
+          PY
+
+      - name: Verify formatting
+        run: cargo fmt --manifest-path liminal-db/Cargo.toml --all -- --check
+
+      - name: Validate full liminal-store contract
+        working-directory: liminal-db
+        run: |
+          set -euo pipefail
+          cargo check -p liminal-store
+          cargo test -q -p liminal-store --no-fail-fast
+
+      - name: Remove temporary workflow
+        run: rm .github/workflows/pr92-trusted-time-fix.yml
+
+      - name: Commit validated fix
+        env:
+          GH_TOKEN: ${{ github.token }}
+        run: |
+          set -euo pipefail
+          git config user.name "github-actions[bot]"
+          git config user.email "41898282+github-actions[bot]@users.noreply.github.com"
+          git add -A
+          git commit -m "fix: bind checkpoint key lifecycle to trusted time"
+          git remote set-url origin "https://x-access-token:${GH_TOKEN}@github.com/${GITHUB_REPOSITORY}.git"
+          git push origin HEAD:feat/checkpoint-anchors-v0-1
