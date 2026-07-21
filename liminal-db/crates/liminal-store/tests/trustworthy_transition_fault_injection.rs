@@ -24,6 +24,10 @@ fn authorization(label: &str) -> TransitionEventInput {
 fn append_failures_poison_until_reopen_and_replay() {
     let cases = [
         (AppendFailpoint::BeforeWrite, 0_u64),
+        (AppendFailpoint::AfterLengthWrite, 0_u64),
+        (AppendFailpoint::AfterPayloadWrite, 0_u64),
+        // The complete frame survives in this non-crash error simulation.
+        // A real pre-sync crash may lose it; reopen always follows the bytes that survived.
         (AppendFailpoint::AfterWriteBeforeSync, 1_u64),
         (AppendFailpoint::AfterSyncBeforeAck, 1_u64),
     ];
@@ -54,4 +58,29 @@ fn append_failures_poison_until_reopen_and_replay() {
             "unexpected replay result for {failpoint:?}"
         );
     }
+}
+
+#[test]
+fn append_failpoint_is_thread_local() {
+    std::thread::spawn(|| {
+        set_append_failpoint_for_test(AppendFailpoint::BeforeWrite);
+    })
+    .join()
+    .expect("failpoint thread");
+
+    let root = tempdir().expect("tempdir");
+    let mut ledger = TrustworthyTransitionLedger::open(root.path()).expect("open");
+    ledger
+        .append(authorization("unaffected-parent-thread"))
+        .expect("another thread's failpoint must not leak");
+
+    set_append_failpoint_for_test(AppendFailpoint::BeforeWrite);
+    let error = ledger
+        .append(authorization("same-thread-failure"))
+        .expect_err("same-thread failpoint must fire");
+    assert!(matches!(error, TransitionLedgerError::Storage(_)));
+    drop(ledger);
+
+    let recovered = TrustworthyTransitionLedger::open(root.path()).expect("reopen");
+    assert_eq!(recovered.event_count(), 1);
 }
