@@ -1,8 +1,8 @@
 # Signed Checkpoint and External Anti-Rollback Profile v0.1
 
-**Status:** Draft stacked interoperability profile  
+**Status:** Draft interoperability profile  
 **Tracking issue:** [LiminalDB #90](https://github.com/safal207/LiminalDB/issues/90)  
-**Base ledger:** [LiminalDB PR #89](https://github.com/safal207/LiminalDB/pull/89)
+**Base ledger:** [LiminalDB PR #89](https://github.com/safal207/LiminalDB/pull/89), merged into `main`
 
 ## Purpose
 
@@ -75,12 +75,25 @@ or both.
 
 - the current trustworthy-transition ledger head;
 - current event count;
-- public transition projections;
+- the ledger's canonical full-state projection digest;
 - `TransitionLedgerSnapshotInfo` returned by a current snapshot;
 - a caller-supplied stable storage-root identity.
 
-The extension rejects snapshot metadata whose event or projection counts do not
-match the currently opened ledger.
+`TransitionLedgerSnapshotInfo` is an opaque capability outside the crate. Public
+getters expose its path, offset, counts, and snapshot digest, but callers cannot
+construct or alter its hidden state-binding fields.
+
+Before checkpoint material is returned, the adapter requires all of the
+following to match the currently opened ledger:
+
+1. snapshot path;
+2. event and projection counts;
+3. event-chain head;
+4. canonical projection digest, including sequence, head, projections, and
+   record ownership.
+
+A snapshot from another ledger is rejected even when its public counts match.
+A snapshot becomes stale and is rejected after the ledger advances.
 
 `storage_root_identity` is a SHA-256 reference supplied by deployment code. It
 may identify a tenant, logical ledger, hardware-bound root, or another stable
@@ -186,6 +199,12 @@ The checked-in fixture covers:
 7. rollback to an older mutually consistent copy;
 8. valid descendant of an external anchor.
 
+The ledger integration tests additionally cover:
+
+1. valid checkpoint material from the current snapshot;
+2. rejection of a foreign snapshot with matching public counts;
+3. rejection of a stale snapshot after the ledger advances.
+
 Run:
 
 ```bash
@@ -225,8 +244,9 @@ The original independent transition verdicts remain unchanged.
 
 ## Merge order
 
-1. merge PR #89;
-2. retarget the stacked checkpoint PR to `main`;
-3. rerun checkpoint conformance and the full workspace CI;
-4. complete CodeRabbit and mandatory Codex review;
-5. only then merge this profile.
+1. PR #89 is merged;
+2. this checkpoint PR is retargeted to `main`;
+3. checkpoint conformance, workspace CI, Security Baseline, and the inherited
+   cross-platform ledger matrix must pass on one exact head;
+4. CodeRabbit and mandatory human/Codex review must complete on that exact head;
+5. only then may this profile merge.
