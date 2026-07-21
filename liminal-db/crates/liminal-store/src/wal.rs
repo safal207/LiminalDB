@@ -236,7 +236,6 @@ impl WalWriter {
         let created = !file_path.exists();
         let mut file = OpenOptions::new()
             .create(true)
-            .append(true)
             .read(true)
             .write(true)
             .open(&file_path)
