@@ -784,7 +784,6 @@ version = "0.1.0"
 dependencies = [
  "anyhow",
  "crc32fast",
- "ed25519-dalek",
  "fs2",
  "liminal-core",
  "parking_lot 0.12.5",
