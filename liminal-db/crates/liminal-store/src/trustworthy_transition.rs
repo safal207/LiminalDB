@@ -222,11 +222,35 @@ struct TransitionLedgerSnapshot {
 
 #[derive(Debug, Clone, PartialEq, Eq)]
 pub struct TransitionLedgerSnapshotInfo {
-    pub path: PathBuf,
-    pub offset: Offset,
-    pub event_count: u64,
-    pub projection_count: usize,
-    pub snapshot_digest: String,
+    pub(crate) path: PathBuf,
+    pub(crate) offset: Offset,
+    pub(crate) event_count: u64,
+    pub(crate) projection_count: usize,
+    pub(crate) snapshot_digest: String,
+    pub(crate) head_event_hash: Option<String>,
+    pub(crate) projection_digest: String,
+}
+
+impl TransitionLedgerSnapshotInfo {
+    pub fn path(&self) -> &Path {
+        &self.path
+    }
+
+    pub fn offset(&self) -> Offset {
+        self.offset
+    }
+
+    pub fn event_count(&self) -> u64 {
+        self.event_count
+    }
+
+    pub fn projection_count(&self) -> usize {
+        self.projection_count
+    }
+
+    pub fn snapshot_digest(&self) -> &str {
+        &self.snapshot_digest
+    }
 }
 
 #[derive(Debug, Error)]
@@ -370,6 +394,10 @@ impl TrustworthyTransitionLedger {
         self.state.next_sequence.saturating_sub(1)
     }
 
+    pub(crate) fn checkpoint_projection_digest(&self) -> Result<String, TransitionLedgerError> {
+        projection_digest(&self.state)
+    }
+
     /// Writes an atomically replaced, digest-bound snapshot at the current WAL
     /// offset. The snapshot remains an accelerator; open() still compares it
     /// with a full replay from offset zero.
@@ -403,6 +431,8 @@ impl TrustworthyTransitionLedger {
             event_count: self.event_count(),
             projection_count: self.state.projections.len(),
             snapshot_digest,
+            head_event_hash: snapshot.body.head_event_hash.clone(),
+            projection_digest: snapshot.body.projection_digest.clone(),
         })
     }
 
@@ -558,10 +588,9 @@ fn apply_authorization(
                 event.body.transition_id.clone(),
             ));
         }
-        let expected = existing
-            .authorization_ref
-            .clone()
-            .ok_or_else(|| TransitionLedgerError::MissingAuthorization(event.body.transition_id.clone()))?;
+        let expected = existing.authorization_ref.clone().ok_or_else(|| {
+            TransitionLedgerError::MissingAuthorization(event.body.transition_id.clone())
+        })?;
         if event.body.links.authorization_ref.as_deref() != Some(expected.as_str()) {
             return Err(TransitionLedgerError::ReauthorizationWithoutSupersession);
         }
@@ -571,8 +600,14 @@ fn apply_authorization(
             &event.body.transition_id,
             &event.body.subject_id,
         )?;
-        validate_monotonic_dimensions(existing.dimensions.as_ref(), event.body.dimensions.as_ref())?;
-        validate_side_effect(existing.side_effect_committed, event.body.side_effect_committed)?;
+        validate_monotonic_dimensions(
+            existing.dimensions.as_ref(),
+            event.body.dimensions.as_ref(),
+        )?;
+        validate_side_effect(
+            existing.side_effect_committed,
+            event.body.side_effect_committed,
+        )?;
 
         let projection = state
             .projections
@@ -626,17 +661,18 @@ fn apply_dependent_record(
         .projections
         .get(&event.body.transition_id)
         .cloned()
-        .ok_or_else(|| TransitionLedgerError::MissingAuthorization(event.body.transition_id.clone()))?;
+        .ok_or_else(|| {
+            TransitionLedgerError::MissingAuthorization(event.body.transition_id.clone())
+        })?;
     if current.subject_id != event.body.subject_id {
         return Err(TransitionLedgerError::SubjectMismatch(
             event.body.transition_id.clone(),
         ));
     }
 
-    let expected_authorization = current
-        .authorization_ref
-        .clone()
-        .ok_or_else(|| TransitionLedgerError::MissingAuthorization(event.body.transition_id.clone()))?;
+    let expected_authorization = current.authorization_ref.clone().ok_or_else(|| {
+        TransitionLedgerError::MissingAuthorization(event.body.transition_id.clone())
+    })?;
     expect_optional_ref(
         state,
         &event.body.links.authorization_ref,
@@ -707,7 +743,10 @@ fn apply_dependent_record(
     }
 
     validate_monotonic_dimensions(current.dimensions.as_ref(), event.body.dimensions.as_ref())?;
-    validate_side_effect(current.side_effect_committed, event.body.side_effect_committed)?;
+    validate_side_effect(
+        current.side_effect_committed,
+        event.body.side_effect_committed,
+    )?;
 
     let projection = state
         .projections
@@ -716,7 +755,9 @@ fn apply_dependent_record(
     match event.body.kind {
         TransitionRecordKind::Authorization => unreachable!("handled by apply_authorization"),
         TransitionRecordKind::Observation => {
-            projection.observation_refs.push(event.body.record_ref.clone());
+            projection
+                .observation_refs
+                .push(event.body.record_ref.clone());
             projection.observation_refs.sort();
             projection.observation_refs.dedup();
         }
@@ -808,10 +849,7 @@ fn ensure_owned_by(
     Ok(())
 }
 
-fn validate_side_effect(
-    previous: bool,
-    update: Option<bool>,
-) -> Result<(), TransitionLedgerError> {
+fn validate_side_effect(previous: bool, update: Option<bool>) -> Result<(), TransitionLedgerError> {
     if previous && update == Some(false) {
         return Err(TransitionLedgerError::SideEffectRollback);
     }
@@ -883,11 +921,7 @@ fn atomic_write(path: &Path, bytes: &[u8]) -> Result<(), TransitionLedgerError> 
         .parent()
         .ok_or_else(|| TransitionLedgerError::Storage("snapshot path has no parent".into()))?;
     fs::create_dir_all(parent).map_err(storage_error)?;
-    let temporary = parent.join(format!(
-        ".{}.{}.tmp",
-        SNAPSHOT_FILE,
-        std::process::id()
-    ));
+    let temporary = parent.join(format!(".{}.{}.tmp", SNAPSHOT_FILE, std::process::id()));
     {
         let mut file = OpenOptions::new()
             .create(true)
@@ -1163,7 +1197,10 @@ mod tests {
                 },
             ))
             .expect_err("missing observation must fail");
-        assert!(matches!(error, TransitionLedgerError::ObservationSetMismatch));
+        assert!(matches!(
+            error,
+            TransitionLedgerError::ObservationSetMismatch
+        ));
     }
 
     #[test]

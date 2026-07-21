@@ -5,10 +5,8 @@ use ed25519_dalek::{Signature, Signer, SigningKey, Verifier, VerifyingKey};
 use serde::{Deserialize, Serialize};
 use thiserror::Error;
 
-use crate::trustworthy_transition::{
-    TransitionLedgerSnapshotInfo, TrustworthyTransitionLedger,
-};
 use crate::sha256_ref;
+use crate::trustworthy_transition::{TransitionLedgerSnapshotInfo, TrustworthyTransitionLedger};
 
 const CHECKPOINT_SCHEMA: &str = "liminaldb.signed-checkpoint-manifest.v0.1";
 const CHECKPOINT_PROFILE: &str = "org.liminaldb.signed-checkpoint.v0.1";
@@ -202,17 +200,22 @@ impl CheckpointLedgerExt for TrustworthyTransitionLedger {
     ) -> Result<CheckpointMaterial, CheckpointError> {
         validate_ref(&storage_root_identity, "storage_root_identity")?;
         validate_ref(&snapshot.snapshot_digest, "snapshot_digest")?;
-        if snapshot.event_count != self.event_count()
-            || snapshot.projection_count != self.projections().len()
-        {
-            return Err(CheckpointError::SnapshotStateMismatch);
-        }
         let event_chain_head = self
             .head_event_hash()
             .ok_or(CheckpointError::MissingLedgerHead)?
             .to_owned();
         validate_ref(&event_chain_head, "event_chain_head")?;
-        let projection_digest = digest_cbor(self.projections())?;
+        let projection_digest = self
+            .checkpoint_projection_digest()
+            .map_err(|error| CheckpointError::Encoding(error.to_string()))?;
+        if snapshot.path.as_path() != self.snapshot_path()
+            || snapshot.event_count != self.event_count()
+            || snapshot.projection_count != self.projections().len()
+            || snapshot.head_event_hash.as_deref() != Some(event_chain_head.as_str())
+            || snapshot.projection_digest != projection_digest
+        {
+            return Err(CheckpointError::SnapshotStateMismatch);
+        }
         Ok(CheckpointMaterial {
             ledger_profile: LEDGER_PROFILE.to_owned(),
             storage_root_identity,
@@ -413,9 +416,7 @@ pub fn verify_checkpoint_chain(
         {
             return Err(CheckpointError::ChainIdentityMismatch);
         }
-        if current.body.previous_checkpoint_ref.as_deref()
-            != Some(previous.manifest_ref.as_str())
-        {
+        if current.body.previous_checkpoint_ref.as_deref() != Some(previous.manifest_ref.as_str()) {
             return Err(CheckpointError::PreviousCheckpointMismatch);
         }
         if current.body.last_sequence <= previous.body.last_sequence
@@ -445,8 +446,7 @@ pub fn verify_checkpoint_chain(
                 if manifests.iter().any(|manifest| {
                     manifest.body.last_sequence == anchor.last_sequence
                         && (manifest.body.event_chain_head != anchor.event_chain_head
-                            || manifest.body.storage_root_identity
-                                != anchor.storage_root_identity)
+                            || manifest.body.storage_root_identity != anchor.storage_root_identity)
                 }) {
                     return Err(CheckpointError::ExternalAnchorFork);
                 }
@@ -522,7 +522,10 @@ fn validate_trusted_key(key: &TrustedCheckpointKey) -> Result<(), CheckpointErro
     normalized(key.signer_id.clone(), "signer_id")?;
     normalized(key.key_id.clone(), "key_id")?;
     decode_fixed::<32>(&key.public_key_hex, "public_key_hex")?;
-    if key.valid_until_ms.is_some_and(|until| until < key.valid_from_ms) {
+    if key
+        .valid_until_ms
+        .is_some_and(|until| until < key.valid_from_ms)
+    {
         return Err(CheckpointError::InvalidField("valid_until_ms"));
     }
     Ok(())
@@ -659,12 +662,8 @@ mod tests {
     }
 
     fn signer(key: &FixtureKey) -> CheckpointSigner {
-        CheckpointSigner::from_seed_hex(
-            key.signer_id.clone(),
-            key.key_id.clone(),
-            &key.seed_hex,
-        )
-        .expect("signer")
+        CheckpointSigner::from_seed_hex(key.signer_id.clone(), key.key_id.clone(), &key.seed_hex)
+            .expect("signer")
     }
 
     fn registry(keys: &[&FixtureKey]) -> TrustedKeyRegistry {
@@ -707,27 +706,17 @@ mod tests {
                     let checkpoint = signer(trusted)
                         .sign(material(10, "head-10"), 100, Some(500), None)
                         .expect("sign");
-                    verify_checkpoint_chain(
-                        &[checkpoint],
-                        &registry(&[trusted]),
-                        None,
-                        200,
-                    )
-                    .map(|result| format!("{:?}", result.status).to_uppercase())
-                    .unwrap_or_else(|error| error.code().to_owned())
+                    verify_checkpoint_chain(&[checkpoint], &registry(&[trusted]), None, 200)
+                        .map(|result| format!("{:?}", result.status).to_uppercase())
+                        .unwrap_or_else(|error| error.code().to_owned())
                 }
                 "wrong_signer" => {
                     let checkpoint = signer(attacker)
                         .sign(material(10, "head-10"), 100, Some(500), None)
                         .expect("sign");
-                    verify_checkpoint_chain(
-                        &[checkpoint],
-                        &registry(&[trusted]),
-                        None,
-                        200,
-                    )
-                    .map(|_| "VERIFIED".to_owned())
-                    .unwrap_or_else(|error| error.code().to_owned())
+                    verify_checkpoint_chain(&[checkpoint], &registry(&[trusted]), None, 200)
+                        .map(|_| "VERIFIED".to_owned())
+                        .unwrap_or_else(|error| error.code().to_owned())
                 }
                 "rotated_key" => {
                     let first = signer(trusted)
@@ -754,27 +743,17 @@ mod tests {
                     let checkpoint = signer(revoked)
                         .sign(material(10, "head-10"), 200, Some(500), None)
                         .expect("sign");
-                    verify_checkpoint_chain(
-                        &[checkpoint],
-                        &registry(&[revoked]),
-                        None,
-                        250,
-                    )
-                    .map(|_| "VERIFIED".to_owned())
-                    .unwrap_or_else(|error| error.code().to_owned())
+                    verify_checkpoint_chain(&[checkpoint], &registry(&[revoked]), None, 250)
+                        .map(|_| "VERIFIED".to_owned())
+                        .unwrap_or_else(|error| error.code().to_owned())
                 }
                 "stale_checkpoint" => {
                     let checkpoint = signer(trusted)
                         .sign(material(10, "head-10"), 100, Some(150), None)
                         .expect("sign");
-                    verify_checkpoint_chain(
-                        &[checkpoint],
-                        &registry(&[trusted]),
-                        None,
-                        200,
-                    )
-                    .map(|_| "VERIFIED".to_owned())
-                    .unwrap_or_else(|error| error.code().to_owned())
+                    verify_checkpoint_chain(&[checkpoint], &registry(&[trusted]), None, 200)
+                        .map(|_| "VERIFIED".to_owned())
+                        .unwrap_or_else(|error| error.code().to_owned())
                 }
                 "forked_ledger_head" => {
                     let anchored = signer(trusted)
@@ -792,14 +771,9 @@ mod tests {
                         last_sequence: anchored.body.last_sequence,
                         anchored_at_ms: 150,
                     };
-                    verify_checkpoint_chain(
-                        &[fork],
-                        &registry(&[trusted]),
-                        Some(&anchor),
-                        200,
-                    )
-                    .map(|_| "VERIFIED".to_owned())
-                    .unwrap_or_else(|error| error.code().to_owned())
+                    verify_checkpoint_chain(&[fork], &registry(&[trusted]), Some(&anchor), 200)
+                        .map(|_| "VERIFIED".to_owned())
+                        .unwrap_or_else(|error| error.code().to_owned())
                 }
                 "external_anchor_rollback" => {
                     let first = signer(trusted)
@@ -822,14 +796,9 @@ mod tests {
                         last_sequence: second.body.last_sequence,
                         anchored_at_ms: 250,
                     };
-                    verify_checkpoint_chain(
-                        &[first],
-                        &registry(&[trusted]),
-                        Some(&anchor),
-                        300,
-                    )
-                    .map(|_| "VERIFIED".to_owned())
-                    .unwrap_or_else(|error| error.code().to_owned())
+                    verify_checkpoint_chain(&[first], &registry(&[trusted]), Some(&anchor), 300)
+                        .map(|_| "VERIFIED".to_owned())
+                        .unwrap_or_else(|error| error.code().to_owned())
                 }
                 "valid_external_anchor" => {
                     let first = signer(trusted)
