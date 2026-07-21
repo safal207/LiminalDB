@@ -36,32 +36,31 @@ jobs:
             exit 0
           fi
           python3 - <<'PY'
+          import re
           from pathlib import Path
 
           path = Path("liminal-db/crates/liminal-store/src/trustworthy_transition.rs")
           text = path.read_text()
 
-          replacements = [
-              (
-                  "use std::fs::{self, File, OpenOptions};",
-                  "use std::fs::{self, OpenOptions};",
-                  "remove direct directory File dependency",
-              ),
-              (
-                  '''    File::open(parent)
-                      .and_then(|directory| directory.sync_all())
-                      .map_err(storage_error)?;
-          ''',
-                  '''    crate::wal::sync_directory(parent).map_err(storage_error)?;
-          ''',
-                  "use platform-aware directory synchronization",
-              ),
-          ]
-          for old, new, label in replacements:
-              count = text.count(old)
-              if count != 1:
-                  raise SystemExit(f"{label}: expected one match, found {count}")
-              text = text.replace(old, new, 1)
+          old_import = "use std::fs::{self, File, OpenOptions};"
+          if text.count(old_import) != 1:
+              raise SystemExit("remove direct directory File dependency: expected one match")
+          text = text.replace(old_import, "use std::fs::{self, OpenOptions};", 1)
+
+          pattern = re.compile(
+              r"    File::open\(parent\)\n"
+              r"\s+\.and_then\(\|directory\| directory\.sync_all\(\)\)\n"
+              r"\s+\.map_err\(storage_error\)\?;\n"
+          )
+          text, count = pattern.subn(
+              "    crate::wal::sync_directory(parent).map_err(storage_error)?;\n",
+              text,
+              count=1,
+          )
+          if count != 1:
+              raise SystemExit(
+                  f"use platform-aware directory synchronization: expected one match, found {count}"
+              )
           path.write_text(text)
           PY
           cargo fmt --manifest-path liminal-db/Cargo.toml --all
