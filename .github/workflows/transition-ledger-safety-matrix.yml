@@ -1,0 +1,60 @@
+name: Transition Ledger Safety Matrix
+
+on:
+  pull_request:
+    branches:
+      - main
+      - feat/trustworthy-transition-ledger-v0.1
+    paths:
+      - 'liminal-db/crates/liminal-store/**'
+      - '.github/workflows/transition-ledger-safety-matrix.yml'
+  push:
+    branches:
+      - main
+    paths:
+      - 'liminal-db/crates/liminal-store/**'
+      - '.github/workflows/transition-ledger-safety-matrix.yml'
+
+permissions:
+  contents: read
+
+concurrency:
+  group: transition-ledger-safety-${{ github.workflow }}-${{ github.ref }}
+  cancel-in-progress: true
+
+jobs:
+  ledger-safety:
+    name: ${{ matrix.os }}
+    strategy:
+      fail-fast: false
+      matrix:
+        os:
+          - ubuntu-latest
+          - windows-latest
+          - macos-latest
+    runs-on: ${{ matrix.os }}
+    defaults:
+      run:
+        working-directory: liminal-db
+    steps:
+      - name: Checkout
+        uses: actions/checkout@v4
+        with:
+          persist-credentials: false
+
+      - name: Set up Rust
+        uses: dtolnay/rust-toolchain@stable
+
+      - name: Cache Cargo
+        uses: Swatinem/rust-cache@v2
+        with:
+          workspaces: liminal-db
+
+      - name: Compile liminal-store
+        run: cargo check -p liminal-store
+
+      - name: Execute canonical ledger fixture
+        run: cargo test -p liminal-store --test trustworthy_transition_fixture
+
+      - name: Run ledger unit and restart tests
+        run: cargo test -p liminal-store trustworthy_transition
