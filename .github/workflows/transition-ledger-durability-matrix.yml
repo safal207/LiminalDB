@@ -1,0 +1,95 @@
+name: PR93 Main Reconcile Bootstrap
+
+on:
+  pull_request:
+    branches: [main]
+    paths:
+      - ".github/workflows/transition-ledger-durability-matrix.yml"
+  workflow_dispatch:
+
+permissions:
+  contents: write
+
+concurrency:
+  group: pr93-main-reconcile-${{ github.event.pull_request.number }}
+  cancel-in-progress: false
+
+jobs:
+  reconcile-validate-push:
+    if: ${{ github.head_ref == 'feat/durability-matrix-v0-1' }}
+    runs-on: ubuntu-latest
+    steps:
+      - name: Checkout exact PR branch
+        uses: actions/checkout@v4
+        with:
+          ref: feat/durability-matrix-v0-1
+          fetch-depth: 0
+          persist-credentials: false
+
+      - name: Fetch archived pre-reconcile head
+        run: |
+          set -euo pipefail
+          git fetch origin archive/pr93-pre-main-reconcile-20260721
+
+      - name: Restore additive durability files
+        run: |
+          set -euo pipefail
+          archive=origin/archive/pr93-pre-main-reconcile-20260721
+          git checkout "$archive" -- \
+            .github/workflows/transition-ledger-durability-matrix.yml \
+            docs/integrations/TRANSITION_LEDGER_DURABILITY_MATRIX_V0_1.md \
+            liminal-db/crates/liminal-store/examples/durability_crash_harness.rs \
+            liminal-db/crates/liminal-store/src/durability.rs \
+            liminal-db/crates/liminal-store/src/snapshot_durability.rs \
+            liminal-db/crates/liminal-store/src/store_debug.rs \
+            tools/run_transition_durability_matrix.py
+
+      - name: Apply modified-file durability delta with three-way merge
+        run: |
+          set -euo pipefail
+          archive=origin/archive/pr93-pre-main-reconcile-20260721
+          base=2cac499c3b73c19d566ac763bf32816f4a4bcadc
+          git diff --binary "$base" "$archive" -- \
+            liminal-db/crates/liminal-store/Cargo.toml \
+            liminal-db/crates/liminal-store/src/lib.rs \
+            liminal-db/crates/liminal-store/src/trustworthy_transition.rs \
+            liminal-db/crates/liminal-store/src/wal.rs \
+            > /tmp/pr93-modified.patch
+          set +e
+          git apply --3way --index /tmp/pr93-modified.patch
+          status=$?
+          set -e
+          if [[ "$status" -ne 0 ]]; then
+            echo "Three-way patch application failed."
+            git status --short
+            git diff --name-only --diff-filter=U
+            for path in $(git diff --name-only --diff-filter=U); do
+              echo "===== CONFLICT: $path ====="
+              grep -n -C 16 -E '^(<<<<<<<|=======|>>>>>>>)' "$path" || true
+            done
+            exit "$status"
+          fi
+          git diff --check
+
+      - name: Validate reconciled durability contract
+        run: |
+          set -euo pipefail
+          cargo fmt --manifest-path liminal-db/Cargo.toml --all -- --check
+          cd liminal-db
+          cargo check --locked -p liminal-store --features durability-failpoints
+          cargo test -q --locked -p liminal-store --features durability-failpoints --no-fail-fast
+          cd ..
+          python tools/run_transition_durability_matrix.py \
+            --output artifacts/transition-ledger-durability-bootstrap.json
+
+      - name: Commit validated reconciliation
+        env:
+          GH_TOKEN: ${{ github.token }}
+        run: |
+          set -euo pipefail
+          git config user.name "github-actions[bot]"
+          git config user.email "41898282+github-actions[bot]@users.noreply.github.com"
+          git add -A
+          git commit -m "reconcile: rebase durability matrix onto merged checkpoint main"
+          git remote set-url origin "https://x-access-token:${GH_TOKEN}@github.com/${GITHUB_REPOSITORY}.git"
+          git push origin HEAD:feat/durability-matrix-v0-1
