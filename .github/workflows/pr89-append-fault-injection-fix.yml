@@ -4,6 +4,7 @@ on:
   pull_request:
     branches:
       - main
+      - feat/trustworthy-transition-ledger-v0.1
     types: [opened, synchronize, reopened, edited]
 
 permissions:
@@ -15,7 +16,7 @@ concurrency:
 
 jobs:
   apply-validate-push:
-    if: ${{ github.head_ref == 'feat/trustworthy-transition-ledger-v0.1' }}
+    if: ${{ github.head_ref == 'agent/pr89-durability-fault-contract' }}
     runs-on: ubuntu-latest
     steps:
       - name: Checkout exact PR head
@@ -55,8 +56,7 @@ jobs:
           set -euo pipefail
           git config user.name "pr89-safety-bot"
           git config user.email "actions@users.noreply.github.com"
-          git add .github/workflows/transition-ledger-safety-matrix.yml \
-                  liminal-db/crates/liminal-store/Cargo.toml \
+          git add liminal-db/crates/liminal-store/Cargo.toml \
                   liminal-db/crates/liminal-store/src/lib.rs \
                   liminal-db/crates/liminal-store/src/wal.rs \
                   liminal-db/crates/liminal-store/tests/trustworthy_transition_fault_injection.rs
