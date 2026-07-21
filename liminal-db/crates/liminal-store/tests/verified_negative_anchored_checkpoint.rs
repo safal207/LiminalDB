@@ -1,9 +1,9 @@
 use liminal_store::{
     sha256_ref, verify_checkpoint_chain, verify_signed_checkpoint, AntiRollbackStatus,
-    AuthorityState, CausalValidityState, CheckpointError, CheckpointLedgerExt,
-    CheckpointSigner, ContinuityPosture, CrashSafeTransitionSnapshotExt, ExecutionState,
-    ExternalAnchor, ResponseIntegrityState, TransitionDimensions, TransitionEventInput,
-    TransitionLinks, TransitionRecordKind, TrustworthyTransitionLedger, TrustedKeyRegistry,
+    AuthorityState, CausalValidityState, CheckpointError, CheckpointLedgerExt, CheckpointSigner,
+    ContinuityPosture, CrashSafeTransitionSnapshotExt, ExecutionState, ExternalAnchor,
+    ResponseIntegrityState, TransitionDimensions, TransitionEventInput, TransitionLinks,
+    TransitionRecordKind, TrustedKeyRegistry, TrustworthyTransitionLedger,
 };
 use serde::Deserialize;
 use serde_json::{json, Value};
@@ -23,6 +23,19 @@ struct Records {
     causal_audit: DigestRecord,
     continuity: DigestRecord,
     continuity_descendant: DigestRecord,
+}
+
+#[derive(Debug, Clone, Deserialize)]
+struct Source {
+    transition_run_id: u64,
+    transition_artifact_id: u64,
+    transition_artifact_sha256: String,
+    downstream_run_id: u64,
+    downstream_artifact_id: u64,
+    downstream_artifact_sha256: String,
+    ledger_replay_run_id: u64,
+    ledger_replay_artifact_id: u64,
+    ledger_replay_artifact_sha256: String,
 }
 
 #[derive(Debug, Clone, Deserialize)]
@@ -77,6 +90,7 @@ struct Fixture {
     transition_id: String,
     subject_id: String,
     captured_at_ms: u64,
+    source: Source,
     records: Records,
     judgment: Judgment,
     checkpoint: CheckpointConfig,
@@ -95,9 +109,82 @@ fn validate_fixture(value: &Fixture) -> Result<(), String> {
     if value.schema_version != "liminaldb-verified-negative-anchored-fixture-v0.1" {
         return Err("unsupported fixture schema".into());
     }
+    if value.transition_id != "airbnb-garden-29702510829"
+        || value.subject_id != "airbnb-listing-1418689551881927394"
+        || value.captured_at_ms != 1_784_493_600_000
+    {
+        return Err("top-level identity mismatch".into());
+    }
+
+    let source = &value.source;
+    if source.transition_run_id != 29_702_510_829
+        || source.transition_artifact_id != 8_446_921_466
+        || source.transition_artifact_sha256
+            != "4b33451c6d96d72705c18d88613555fdcb9be16af03425cb59539585ea9e11be"
+        || source.downstream_run_id != 29_703_167_897
+        || source.downstream_artifact_id != 8_447_067_600
+        || source.downstream_artifact_sha256
+            != "29279d724760af558b4d11c6ce1bbcb6c99e6aff238da35cc50e26e1ff3f9866"
+        || source.ledger_replay_run_id != 29_703_523_625
+        || source.ledger_replay_artifact_id != 8_447_178_293
+        || source.ledger_replay_artifact_sha256
+            != "4067c3e197a582affc83e4d0426780b11ccbfad05e884688053c2af0a0e8dde2"
+    {
+        return Err("source provenance mismatch".into());
+    }
+
+    let records = [
+        (
+            &value.records.authorization,
+            "sha256:f073104629d6298e10b0f17b2e5fa88c9abab84838335763944d648cf4c1b7cc",
+            "sha256:aeefb218ef0590ea40a5f6c40223a6da864abdcce5570598b9adb4771c7c28a8",
+        ),
+        (
+            &value.records.observation,
+            "sha256:9145606b8c541b6d5af62aab3c8d23fe05e31397b90482e37720cdec3ebf1d33",
+            "sha256:4939d2adf5cfd48d3cfa445b8175e4e129e8cbdb2d63e5caf6a1380abbeed29b",
+        ),
+        (
+            &value.records.response_integrity,
+            "sha256:449b3c2310591c64a86b230100b3b3007a855d3fd9af9a824cf48d07daec3c78",
+            "sha256:449b3c2310591c64a86b230100b3b3007a855d3fd9af9a824cf48d07daec3c78",
+        ),
+        (
+            &value.records.causal_audit,
+            "sha256:81ca2b25d6c84eea89e8559091e2c6748977a483d88075c7627e5b6cb8c09262",
+            "sha256:ce8f05643f51015c64364f5d13f0597289c1064bd1c3b4eb5c5f6c1824c5bb77",
+        ),
+        (
+            &value.records.continuity,
+            "sha256:8ade7ca92261f1ee961440cd3696da82698ff933205d30dc813ecf6d87cbce74",
+            "sha256:29e9a1d8f0ad2513d42c1aa2c9312e717cbb13e34067ec76ff110440ddff6de9",
+        ),
+        (
+            &value.records.continuity_descendant,
+            "sha256:200e0076823c241cdb05db79fce50ad51bef01f4f0456e8fa2ebd93ae2809619",
+            "sha256:521c236216e5f5ee606394e1594bf25e376ee5fbd1bb55d1a58f742a64450c22",
+        ),
+    ];
+    for (record, expected_ref, expected_digest) in records {
+        if record.record_ref != expected_ref || record.payload_digest != expected_digest {
+            return Err("record identity mismatch".into());
+        }
+    }
+
+    let checkpoint = &value.checkpoint;
+    if checkpoint.storage_root_identity
+        != "sha256:22a2426f251fe30e9951f2c7ce9dcbe33d05db84c20236818c71246add7d85ef"
+        || checkpoint.signer_id != "operator:liminal-test"
+        || checkpoint.key_id != "airbnb-negative-key-1"
+        || checkpoint.seed_hex != "1111111111111111111111111111111111111111111111111111111111111111"
+        || checkpoint.provider_profile != "org.liminaldb.test-external-anchor.v0.1"
+        || checkpoint.anchor_id != "airbnb-negative-anchor-29702510829"
+    {
+        return Err("checkpoint identity mismatch".into());
+    }
+
     if value.judgment.verdict != "ALLOW"
-        || value.judgment.verdict_scope
-            != "artifact_only_verified_negative_memory_candidate"
+        || value.judgment.verdict_scope != "artifact_only_verified_negative_memory_candidate"
         || value.judgment.decision_status != "CONFIRMED"
         || value.judgment.result_class != "VERIFIED_NEGATIVE_OBSERVATION"
         || value.judgment.cause_status != "UNCONFIRMED"
@@ -258,12 +345,7 @@ fn verified_negative_checkpoint_is_signed_anchored_and_rollback_safe(
             fixture.checkpoint.storage_root_identity.clone(),
             &snapshot_one,
         )?;
-        let checkpoint_one = signer.sign(
-            material_one,
-            fixture.captured_at_ms + 10,
-            None,
-            None,
-        )?;
+        let checkpoint_one = signer.sign(material_one, fixture.captured_at_ms + 10, None, None)?;
         verify_signed_checkpoint(&checkpoint_one, &registry, fixture.captured_at_ms + 11)?;
 
         ledger.append(input(
@@ -348,12 +430,9 @@ fn verified_negative_checkpoint_is_signed_anchored_and_rollback_safe(
             "00"
         };
         tampered.signature_hex.replace_range(0..2, replacement);
-        let tamper_error = verify_signed_checkpoint(
-            &tampered,
-            &registry,
-            fixture.captured_at_ms + 22,
-        )
-        .expect_err("tampered signature must fail");
+        let tamper_error =
+            verify_signed_checkpoint(&tampered, &registry, fixture.captured_at_ms + 22)
+                .expect_err("tampered signature must fail");
         assert_eq!(tamper_error, CheckpointError::SignatureVerificationFailed);
 
         let projection = ledger
@@ -363,8 +442,14 @@ fn verified_negative_checkpoint_is_signed_anchored_and_rollback_safe(
         assert_eq!(ledger.event_count(), 6);
         assert!(!projection.side_effect_committed);
         let final_dimensions = projection.dimensions.as_ref().expect("dimensions");
-        assert_eq!(final_dimensions.causal_validity, CausalValidityState::NotEvaluated);
-        assert_eq!(final_dimensions.continuity_posture, ContinuityPosture::ReportOnly);
+        assert_eq!(
+            final_dimensions.causal_validity,
+            CausalValidityState::NotEvaluated
+        );
+        assert_eq!(
+            final_dimensions.continuity_posture,
+            ContinuityPosture::ReportOnly
+        );
 
         (checkpoint_one, checkpoint_two, anchor, projection)
     };
@@ -433,4 +518,17 @@ fn anchored_fixture_rejects_authority_and_memory_escalation() {
     power_loss["rehearsal_boundary"]["sudden_power_loss_claimed"] = Value::Bool(true);
     let power_loss: Fixture = serde_json::from_value(power_loss).expect("typed power fixture");
     assert!(validate_fixture(&power_loss).is_err());
+
+    let mut source_drift: Value = serde_json::from_str(source).expect("fixture JSON");
+    source_drift["source"]["transition_run_id"] = Value::from(0_u64);
+    let source_drift: Fixture =
+        serde_json::from_value(source_drift).expect("typed source-drift fixture");
+    assert!(validate_fixture(&source_drift).is_err());
+
+    let mut record_drift: Value = serde_json::from_str(source).expect("fixture JSON");
+    record_drift["records"]["authorization"]["record_ref"] =
+        Value::String("sha256:drift".to_owned());
+    let record_drift: Fixture =
+        serde_json::from_value(record_drift).expect("typed record-drift fixture");
+    assert!(validate_fixture(&record_drift).is_err());
 }

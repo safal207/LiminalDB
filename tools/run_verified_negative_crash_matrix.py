@@ -61,6 +61,13 @@ def parse_receipt(output: str) -> dict[str, object]:
     memory = receipt.get("memory")
     if memory != {"durable_memory_accepted": False, "production_write": False}:
         raise RuntimeError(f"memory boundary mismatch: {memory!r}")
+    authority = receipt.get("authority")
+    if authority != {
+        "external_submission": False,
+        "deployment": False,
+        "merge": False,
+    }:
+        raise RuntimeError(f"authority boundary mismatch: {authority!r}")
     return receipt
 
 
