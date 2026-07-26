@@ -1,0 +1,81 @@
+{
+  "schema_version": "liminaldb-verified-negative-anchored-fixture-v0.1",
+  "transition_id": "airbnb-garden-29702510829",
+  "subject_id": "airbnb-listing-1418689551881927394",
+  "captured_at_ms": 1784493600000,
+  "source": {
+    "transition_run_id": 29702510829,
+    "transition_artifact_id": 8446921466,
+    "transition_artifact_sha256": "4b33451c6d96d72705c18d88613555fdcb9be16af03425cb59539585ea9e11be",
+    "downstream_run_id": 29703167897,
+    "downstream_artifact_id": 8447067600,
+    "downstream_artifact_sha256": "29279d724760af558b4d11c6ce1bbcb6c99e6aff238da35cc50e26e1ff3f9866",
+    "ledger_replay_run_id": 29703523625,
+    "ledger_replay_artifact_id": 8447178293,
+    "ledger_replay_artifact_sha256": "4067c3e197a582affc83e4d0426780b11ccbfad05e884688053c2af0a0e8dde2"
+  },
+  "records": {
+    "authorization": {
+      "record_ref": "sha256:f073104629d6298e10b0f17b2e5fa88c9abab84838335763944d648cf4c1b7cc",
+      "payload_digest": "sha256:aeefb218ef0590ea40a5f6c40223a6da864abdcce5570598b9adb4771c7c28a8"
+    },
+    "observation": {
+      "record_ref": "sha256:9145606b8c541b6d5af62aab3c8d23fe05e31397b90482e37720cdec3ebf1d33",
+      "payload_digest": "sha256:4939d2adf5cfd48d3cfa445b8175e4e129e8cbdb2d63e5caf6a1380abbeed29b"
+    },
+    "response_integrity": {
+      "record_ref": "sha256:449b3c2310591c64a86b230100b3b3007a855d3fd9af9a824cf48d07daec3c78",
+      "payload_digest": "sha256:449b3c2310591c64a86b230100b3b3007a855d3fd9af9a824cf48d07daec3c78"
+    },
+    "causal_audit": {
+      "record_ref": "sha256:81ca2b25d6c84eea89e8559091e2c6748977a483d88075c7627e5b6cb8c09262",
+      "payload_digest": "sha256:ce8f05643f51015c64364f5d13f0597289c1064bd1c3b4eb5c5f6c1824c5bb77"
+    },
+    "continuity": {
+      "record_ref": "sha256:8ade7ca92261f1ee961440cd3696da82698ff933205d30dc813ecf6d87cbce74",
+      "payload_digest": "sha256:29e9a1d8f0ad2513d42c1aa2c9312e717cbb13e34067ec76ff110440ddff6de9"
+    },
+    "continuity_descendant": {
+      "record_ref": "sha256:200e0076823c241cdb05db79fce50ad51bef01f4f0456e8fa2ebd93ae2809619",
+      "payload_digest": "sha256:521c236216e5f5ee606394e1594bf25e376ee5fbd1bb55d1a58f742a64450c22"
+    }
+  },
+  "judgment": {
+    "verdict": "ALLOW",
+    "verdict_scope": "artifact_only_verified_negative_memory_candidate",
+    "decision_status": "CONFIRMED",
+    "result_class": "VERIFIED_NEGATIVE_OBSERVATION",
+    "cause_status": "UNCONFIRMED",
+    "confidence": "OBSERVED_ONCE",
+    "fabricated_claim_control": "CONTRADICTED",
+    "supported_claim_count": 8,
+    "durable_memory": false
+  },
+  "checkpoint": {
+    "storage_root_identity": "sha256:22a2426f251fe30e9951f2c7ce9dcbe33d05db84c20236818c71246add7d85ef",
+    "signer_id": "operator:liminal-test",
+    "key_id": "airbnb-negative-key-1",
+    "seed_hex": "1111111111111111111111111111111111111111111111111111111111111111",
+    "provider_profile": "org.liminaldb.test-external-anchor.v0.1",
+    "anchor_id": "airbnb-negative-anchor-29702510829"
+  },
+  "authority": {
+    "mode": "audit_only",
+    "ownership": false,
+    "approval": false,
+    "execution": false,
+    "delivery": false,
+    "external_submission": false,
+    "deployment": false,
+    "merge": false,
+    "durable_memory_write": false
+  },
+  "rehearsal_boundary": {
+    "ledger_root": "temporary_directory",
+    "production_write": false,
+    "side_effect_committed": false,
+    "delete_after_test": true,
+    "crash_simulation": true,
+    "sudden_power_loss_claimed": false
+  }
+}
