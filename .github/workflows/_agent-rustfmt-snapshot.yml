@@ -1,0 +1,87 @@
+name: Agent rustfmt snapshot
+
+on:
+  push:
+    branches:
+      - agent/root-rustfmt-clean-v0-1
+
+permissions:
+  contents: read
+
+jobs:
+  snapshot:
+    runs-on: ubuntu-latest
+    steps:
+      - name: Checkout
+        uses: actions/checkout@v6
+        with:
+          persist-credentials: false
+
+      - name: Set up Rust
+        uses: dtolnay/rust-toolchain@stable
+        with:
+          components: rustfmt
+
+      - name: Format complete root workspace
+        run: cargo fmt --all
+
+      - name: Capture exact formatting delta
+        shell: bash
+        run: |
+          python3 - <<'PY'
+          import base64
+          import hashlib
+          import json
+          import subprocess
+          from pathlib import Path
+
+          changed = subprocess.check_output(
+              ["git", "diff", "--name-only", "--diff-filter=ACM"],
+              text=True,
+          ).splitlines()
+
+          unexpected = [path for path in changed if not path.endswith(".rs")]
+          if unexpected:
+              raise SystemExit(f"cargo fmt changed non-Rust files: {unexpected}")
+
+          entries = []
+          for path in changed:
+              data = Path(path).read_bytes()
+              entries.append(
+                  {
+                      "path": path,
+                      "sha256": hashlib.sha256(data).hexdigest(),
+                      "content_base64": base64.b64encode(data).decode("ascii"),
+                  }
+              )
+
+          artifact_dir = Path("artifacts")
+          artifact_dir.mkdir(exist_ok=True)
+          (artifact_dir / "rustfmt-files.json").write_text(
+              json.dumps(
+                  {
+                      "base_commit": subprocess.check_output(
+                          ["git", "rev-parse", "HEAD"], text=True
+                      ).strip(),
+                      "changed_file_count": len(entries),
+                      "files": entries,
+                  },
+                  indent=2,
+              )
+              + "\n",
+              encoding="utf-8",
+          )
+          with (artifact_dir / "rustfmt.patch").open("wb") as patch:
+              subprocess.run(["git", "diff", "--binary"], stdout=patch, check=True)
+          PY
+
+          cargo fmt --all --check
+          git diff --check
+
+      - name: Upload formatting snapshot
+        uses: actions/upload-artifact@v7
+        with:
+          name: root-rustfmt-snapshot
+          path: artifacts
+          if-no-files-found: error
+          retention-days: 3
