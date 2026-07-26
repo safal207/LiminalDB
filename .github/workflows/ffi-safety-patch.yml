@@ -44,7 +44,6 @@ jobs:
 
             python3 - <<'PY'
           from pathlib import Path
-          import re
 
           ffi_path = Path('liminal-db/crates/liminal-bridge-abi/src/ffi.rs')
           cli_path = Path('liminal-db/crates/liminal-cli/src/main.rs')
@@ -55,12 +54,6 @@ jobs:
               '#[no_mangle]\npub extern "C" fn liminal_push(msg_cbor: *const u8, len: usize) -> usize {': '''/// Pushes one CBOR-encoded protocol message into the bridge.\n///\n/// # Safety\n///\n/// When `len` is non-zero, `msg_cbor` must be non-null, properly aligned, and\n/// point to `len` readable bytes that remain valid for the duration of this call.\n#[no_mangle]\npub unsafe extern "C" fn liminal_push(msg_cbor: *const u8, len: usize) -> usize {''',
               '#[no_mangle]\npub extern "C" fn liminal_pull(out: *mut u8, cap: usize) -> usize {': '''/// Copies the next CBOR-encoded package into a caller-owned output buffer.\n///\n/// # Safety\n///\n/// When `cap` is non-zero, `out` must be non-null, properly aligned, and point\n/// to `cap` writable bytes. The writable range must not overlap bridge-owned\n/// memory and must remain valid for the duration of this call.\n#[no_mangle]\npub unsafe extern "C" fn liminal_pull(out: *mut u8, cap: usize) -> usize {''',
           }
-          for old, new in declarations.items():
-              count = ffi.count(old)
-              print('declaration match', old.split('fn ')[-1].split('(')[0], count)
-              if count != 1:
-                  raise SystemExit(f'expected one declaration match, found {count}')
-              ffi = ffi.replace(old, new, 1)
 
           def wrap_calls(text: str, function_name: str) -> tuple[str, int]:
               token = function_name + '('
@@ -70,10 +63,14 @@ jobs:
                   start = text.find(token, cursor)
                   if start < 0:
                       return text, wrapped
-                  prefix = text[max(0, start - 160):start]
-                  if re.search(rf'\bfn\s+{re.escape(function_name)}\s*$', prefix):
+
+                  line_start = text.rfind('\n', 0, start) + 1
+                  line_prefix = text[line_start:start]
+                  if ' fn ' in line_prefix or line_prefix.lstrip().startswith('fn '):
                       cursor = start + len(token)
                       continue
+
+                  prefix = text[max(0, start - 32):start]
                   if prefix.rstrip().endswith('unsafe {'):
                       cursor = start + len(token)
                       continue
@@ -115,15 +112,22 @@ jobs:
           for name in ('liminal_init', 'liminal_push', 'liminal_pull'):
               ffi, count = wrap_calls(ffi, name)
               print('ffi calls wrapped', name, count)
-              if count < 1:
-                  raise SystemExit(f'expected at least one in-file caller for {name}')
+              if count != 1:
+                  raise SystemExit(f'expected exactly one in-file call for {name}, found {count}')
 
           cli = cli_path.read_text(encoding='utf-8')
           for name in ('liminal_init', 'liminal_push', 'liminal_pull'):
               cli, count = wrap_calls(cli, name)
               print('cli calls wrapped', name, count)
-              if count < 1:
-                  raise SystemExit(f'expected at least one CLI caller for {name}')
+              if count != 1:
+                  raise SystemExit(f'expected exactly one CLI call for {name}, found {count}')
+
+          for old, new in declarations.items():
+              count = ffi.count(old)
+              print('declaration match', old.split('fn ')[-1].split('(')[0], count)
+              if count != 1:
+                  raise SystemExit(f'expected one declaration match, found {count}')
+              ffi = ffi.replace(old, new, 1)
 
           ffi_path.write_text(ffi, encoding='utf-8')
           cli_path.write_text(cli, encoding='utf-8')
