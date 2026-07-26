@@ -139,14 +139,13 @@ impl LiminalClient {
 
     pub async fn auth(&self) {
         if let (Some(key_id), Some(secret)) = (&self.opts.key_id, &self.opts.secret) {
-            self
-                .send(CommandEnvelope::AuthCommand(protocol::AuthCommand {
-                    key_id: key_id.clone(),
-                    namespace: self.opts.namespace.clone(),
-                    op: "auth".to_string(),
-                    secret: secret.clone(),
-                }))
-                .await;
+            self.send(CommandEnvelope::AuthCommand(protocol::AuthCommand {
+                key_id: key_id.clone(),
+                namespace: self.opts.namespace.clone(),
+                op: "auth".to_string(),
+                secret: secret.clone(),
+            }))
+            .await;
         }
     }
 
@@ -175,88 +174,95 @@ impl LiminalClient {
     }
 
     pub async fn unsubscribe(&self, id: &str) {
-        self
-            .send(CommandEnvelope::UnsubscribeCommand(protocol::UnsubscribeCommand {
+        self.send(CommandEnvelope::UnsubscribeCommand(
+            protocol::UnsubscribeCommand {
                 id: id.to_string(),
                 op: "unsubscribe".into(),
-            }))
-            .await;
+            },
+        ))
+        .await;
     }
 
     pub async fn intent_text(&self, text: &str, lang: Option<&str>) {
-        self
-            .send(CommandEnvelope::IntentTextCommand(protocol::IntentTextCommand {
+        self.send(CommandEnvelope::IntentTextCommand(
+            protocol::IntentTextCommand {
                 lang: lang.map(|s| s.to_string()),
                 op: "intent.text".into(),
                 text: text.to_string(),
-            }))
-            .await;
+            },
+        ))
+        .await;
     }
 
     pub async fn intent(&self, kind: &str, payload: JsonValue) {
-        self
-            .send(CommandEnvelope::IntentInvokeCommand(protocol::IntentInvokeCommand {
+        self.send(CommandEnvelope::IntentInvokeCommand(
+            protocol::IntentInvokeCommand {
                 kind: kind.to_string(),
                 op: "intent".into(),
                 payload,
-            }))
-            .await;
+            },
+        ))
+        .await;
     }
 
     pub async fn seed_plant(&self, spec: JsonValue) -> String {
         let id = uuid::Uuid::new_v4().to_string();
-        self
-            .send(CommandEnvelope::SeedPlantCommand(protocol::SeedPlantCommand {
+        self.send(CommandEnvelope::SeedPlantCommand(
+            protocol::SeedPlantCommand {
                 id: id.clone(),
                 op: "seed.plant".into(),
                 spec,
-            }))
-            .await;
+            },
+        ))
+        .await;
         id
     }
 
     pub async fn seed_abort(&self, id: &str, reason: Option<&str>) {
-        self
-            .send(CommandEnvelope::SeedAbortCommand(protocol::SeedAbortCommand {
+        self.send(CommandEnvelope::SeedAbortCommand(
+            protocol::SeedAbortCommand {
                 id: id.to_string(),
                 op: "seed.abort".into(),
                 reason: reason.map(|s| s.to_string()),
-            }))
-            .await;
+            },
+        ))
+        .await;
     }
 
     pub async fn seed_garden(&self) {
-        self
-            .send(CommandEnvelope::SeedGardenCommand(protocol::SeedGardenCommand {
+        self.send(CommandEnvelope::SeedGardenCommand(
+            protocol::SeedGardenCommand {
                 op: "seed.garden".into(),
-            }))
-            .await;
+            },
+        ))
+        .await;
     }
 
     pub async fn dream_now(&self, intensity: Option<f64>) {
-        self
-            .send(CommandEnvelope::DreamNowCommand(protocol::DreamNowCommand {
+        self.send(CommandEnvelope::DreamNowCommand(
+            protocol::DreamNowCommand {
                 intensity,
                 op: "dream.now".into(),
-            }))
-            .await;
+            },
+        ))
+        .await;
     }
 
     pub async fn sync_now(&self, scope: Option<&str>) {
-        self
-            .send(CommandEnvelope::SyncNowCommand(protocol::SyncNowCommand {
-                op: "sync.now".into(),
-                scope: scope.map(|s| s.to_string()),
-            }))
-            .await;
+        self.send(CommandEnvelope::SyncNowCommand(protocol::SyncNowCommand {
+            op: "sync.now".into(),
+            scope: scope.map(|s| s.to_string()),
+        }))
+        .await;
     }
 
     pub async fn awaken_now(&self) {
-        self
-            .send(CommandEnvelope::AwakenNowCommand(protocol::AwakenNowCommand {
+        self.send(CommandEnvelope::AwakenNowCommand(
+            protocol::AwakenNowCommand {
                 op: "awaken.now".into(),
-            }))
-            .await;
+            },
+        ))
+        .await;
     }
 
     pub async fn mirror_timeline(&self, from: &str, to: &str) {
@@ -264,47 +270,50 @@ impl LiminalClient {
             "from": from,
             "to": to,
         });
-        self
-            .send(CommandEnvelope::MirrorTimelineCommand(protocol::MirrorTimelineCommand {
+        self.send(CommandEnvelope::MirrorTimelineCommand(
+            protocol::MirrorTimelineCommand {
                 op: "mirror.timeline".into(),
                 range,
-            }))
-            .await;
+            },
+        ))
+        .await;
     }
 
     pub async fn mirror_replay(&self, cursor: Option<&str>) {
-        self
-            .send(CommandEnvelope::MirrorReplayCommand(protocol::MirrorReplayCommand {
+        self.send(CommandEnvelope::MirrorReplayCommand(
+            protocol::MirrorReplayCommand {
                 cursor: cursor.map(|s| s.to_string()),
                 op: "mirror.replay".into(),
-            }))
-            .await;
+            },
+        ))
+        .await;
     }
 
     pub async fn noetic_propose(&self, proposal: JsonValue) {
-        self
-            .send(CommandEnvelope::NoeticProposeCommand(protocol::NoeticProposeCommand {
+        self.send(CommandEnvelope::NoeticProposeCommand(
+            protocol::NoeticProposeCommand {
                 op: "noetic.propose".into(),
                 proposal,
-            }))
-            .await;
+            },
+        ))
+        .await;
     }
 
     pub async fn peers_add(&self, peer: JsonValue) {
-        self
-            .send(CommandEnvelope::PeerAddCommand(protocol::PeerAddCommand {
-                op: "peers.add".into(),
-                peer,
-            }))
-            .await;
+        self.send(CommandEnvelope::PeerAddCommand(protocol::PeerAddCommand {
+            op: "peers.add".into(),
+            peer,
+        }))
+        .await;
     }
 
     pub async fn peers_list(&self) {
-        self
-            .send(CommandEnvelope::PeerListCommand(protocol::PeerListCommand {
+        self.send(CommandEnvelope::PeerListCommand(
+            protocol::PeerListCommand {
                 op: "peers.list".into(),
-            }))
-            .await;
+            },
+        ))
+        .await;
     }
 }
 
@@ -407,10 +416,9 @@ async fn run_connection(
             break;
         }
         sleep(backoff).await;
-        backoff = opts
-            .backoff
-            .max
-            .min(Duration::from_secs_f32(backoff.as_secs_f32() * opts.backoff.factor));
+        backoff = opts.backoff.max.min(Duration::from_secs_f32(
+            backoff.as_secs_f32() * opts.backoff.factor,
+        ));
     }
 }
 

@@ -3,7 +3,7 @@ use std::fmt;
 use std::time::Duration;
 
 use ed25519_dalek::Signer;
-use ed25519_dalek::{SigningKey, VerifyingKey, Signature, Verifier};
+use ed25519_dalek::{Signature, SigningKey, Verifier, VerifyingKey};
 use parking_lot::RwLock;
 use serde::{Deserialize, Serialize};
 use thiserror::Error;
