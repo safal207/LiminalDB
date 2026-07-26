@@ -1,3 +1,4 @@
+# Exact-head validation pulse for stacked PR #106. Removed in the next commit.
 name: LiminalDB CI
 
 on:
