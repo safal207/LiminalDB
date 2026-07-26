@@ -423,8 +423,14 @@ impl BridgeState {
     }
 }
 
+/// Initializes the global bridge from a CBOR configuration buffer.
+///
+/// # Safety
+///
+/// When `len` is non-zero, `cfg_cbor` must be non-null, properly aligned, and
+/// point to `len` readable bytes that remain valid for the duration of this call.
 #[no_mangle]
-pub extern "C" fn liminal_init(cfg_cbor: *const u8, len: usize) -> bool {
+pub unsafe extern "C" fn liminal_init(cfg_cbor: *const u8, len: usize) -> bool {
     if cfg_cbor.is_null() || len == 0 {
         return false;
     }
@@ -440,8 +446,14 @@ pub extern "C" fn liminal_init(cfg_cbor: *const u8, len: usize) -> bool {
     STATE.set(state).is_ok()
 }
 
+/// Pushes one CBOR-encoded protocol message into the bridge.
+///
+/// # Safety
+///
+/// When `len` is non-zero, `msg_cbor` must be non-null, properly aligned, and
+/// point to `len` readable bytes that remain valid for the duration of this call.
 #[no_mangle]
-pub extern "C" fn liminal_push(msg_cbor: *const u8, len: usize) -> usize {
+pub unsafe extern "C" fn liminal_push(msg_cbor: *const u8, len: usize) -> usize {
     if msg_cbor.is_null() || len == 0 {
         return 0;
     }
@@ -1248,8 +1260,15 @@ fn top_tensions(model: &ResonantModel, limit: usize) -> Vec<JsonValue> {
         .collect()
 }
 
+/// Copies the next CBOR-encoded package into a caller-owned output buffer.
+///
+/// # Safety
+///
+/// When `cap` is non-zero, `out` must be non-null, properly aligned, and point
+/// to `cap` writable bytes. The writable range must not overlap bridge-owned
+/// memory and must remain valid for the duration of this call.
 #[no_mangle]
-pub extern "C" fn liminal_pull(out: *mut u8, cap: usize) -> usize {
+pub unsafe extern "C" fn liminal_pull(out: *mut u8, cap: usize) -> usize {
     if out.is_null() || cap == 0 {
         return 0;
     }
@@ -1301,7 +1320,7 @@ mod tests {
             ws_format: None,
         };
         let cfg_bytes = serde_cbor::to_vec(&cfg).unwrap();
-        assert!(liminal_init(cfg_bytes.as_ptr(), cfg_bytes.len()));
+        assert!(unsafe { liminal_init(cfg_bytes.as_ptr(), cfg_bytes.len()) });
 
         let impulse = ProtocolImpulse {
             kind: 0,
@@ -1312,14 +1331,14 @@ mod tests {
         };
         let imp_bytes = serde_cbor::to_vec(&impulse).unwrap();
         assert_eq!(
-            liminal_push(imp_bytes.as_ptr(), imp_bytes.len()),
+            unsafe { liminal_push(imp_bytes.as_ptr(), imp_bytes.len()) },
             imp_bytes.len()
         );
 
         std::thread::sleep(std::time::Duration::from_millis(250));
 
         let mut buffer = vec![0u8; 1024];
-        let written = liminal_pull(buffer.as_mut_ptr(), buffer.len());
+        let written = unsafe { liminal_pull(buffer.as_mut_ptr(), buffer.len()) };
         assert!(written > 0);
         let package: ProtocolPackage = serde_cbor::from_slice(&buffer[..written]).unwrap();
         assert!(package.metrics.is_some() || !package.events.is_empty());
