@@ -651,7 +651,7 @@ async fn run_pipe_cbor(store: Option<StoreRuntimeConfig>) -> Result<()> {
         ws_format: None,
     };
     let cfg_bytes = serde_cbor::to_vec(&config)?;
-    if !liminal_init(cfg_bytes.as_ptr(), cfg_bytes.len()) {
+    if !unsafe { liminal_init(cfg_bytes.as_ptr(), cfg_bytes.len()) } {
         return Err(anyhow!("failed to initialize liminal bridge"));
     }
 
@@ -671,7 +671,7 @@ async fn run_pipe_cbor(store: Option<StoreRuntimeConfig>) -> Result<()> {
                         match Vec::<u8>::from_hex(trimmed) {
                             Ok(bytes) => {
                                 let result = task::spawn_blocking(move || {
-                                    liminal_push(bytes.as_ptr(), bytes.len())
+                                    unsafe { liminal_push(bytes.as_ptr(), bytes.len()) }
                                 })
                                 .await
                                 .unwrap_or(0);
@@ -703,7 +703,7 @@ async fn run_pipe_cbor(store: Option<StoreRuntimeConfig>) -> Result<()> {
 
 fn drain_outputs(buffer: &mut [u8]) -> Result<()> {
     loop {
-        let written = liminal_pull(buffer.as_mut_ptr(), buffer.len());
+        let written = unsafe { liminal_pull(buffer.as_mut_ptr(), buffer.len()) };
         if written == 0 {
             break;
         }
