@@ -48,41 +48,32 @@ jobs:
         continue-on-error: true
         run: cargo fmt --all --check
 
-      - name: Cargo check (root workspace, all targets)
+      - name: Generate root lockfile candidate and check workspace
         id: cargo_check
         continue-on-error: true
         shell: bash
         run: |
           mkdir -p artifacts
           set -o pipefail
-          cargo check --workspace --all-targets --locked 2>&1 | tee artifacts/cargo-check.txt
+          cargo check --workspace --all-targets 2>&1 | tee artifacts/cargo-check.txt
+          cp Cargo.lock artifacts/Cargo.lock
 
-      - name: Upload cargo-check failure evidence
-        if: steps.cargo_check.outcome == 'failure'
+      - name: Upload root lockfile candidate
+        if: always()
         uses: actions/upload-artifact@v4
         with:
-          name: root-workspace-cargo-check-failure
-          path: artifacts/cargo-check.txt
+          name: root-workspace-lockfile-candidate
+          path: |
+            artifacts/Cargo.lock
+            artifacts/cargo-check.txt
           if-no-files-found: error
           retention-days: 14
-
-      - name: Clippy (root workspace, all targets)
-        if: steps.cargo_check.outcome == 'success'
-        run: cargo clippy --workspace --all-targets --locked
-
-      - name: Cargo test (root workspace)
-        if: steps.cargo_check.outcome == 'success'
-        run: cargo test --workspace --locked --no-fail-fast
-
-      - name: Trustworthy-transition ledger restart demo
-        if: steps.cargo_check.outcome == 'success'
-        run: cargo run -q --locked -p liminal-store --example trustworthy_transition_ledger
 
       - name: Report inherited formatting debt
         if: steps.formatting.outcome == 'failure'
         run: >-
-          echo "::warning title=Inherited Rust formatting debt::cargo fmt --all --check found pre-existing workspace drift. See issue #104; check, clippy, tests, and the restart demo remain blocking."
+          echo "::warning title=Inherited Rust formatting debt::cargo fmt --all --check found pre-existing workspace drift. See issue #104."
 
-      - name: Fail closed on root-workspace check error
-        if: steps.cargo_check.outcome == 'failure'
+      - name: Stop after lockfile diagnostic
+        if: always()
         run: exit 1
