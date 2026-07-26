@@ -9,7 +9,12 @@ on:
       - "liminal-db/crates/liminal-store/src/lib.rs"
       - "liminal-db/crates/liminal-store/Cargo.toml"
       - "liminal-db/crates/liminal-store/examples/durability_crash_harness.rs"
+      - "liminal-db/crates/liminal-store/examples/verified_negative_crash_harness.rs"
+      - "liminal-db/crates/liminal-store/examples/verified_negative_recover_inspect.rs"
+      - "liminal-db/crates/liminal-store/tests/verified_negative_anchored_checkpoint.rs"
+      - "liminal-db/crates/liminal-store/tests/fixtures/pythia_verified_negative_anchored_v0.1.json"
       - "tools/run_transition_durability_matrix.py"
+      - "tools/run_verified_negative_crash_matrix.py"
       - "docs/integrations/TRANSITION_LEDGER_DURABILITY_MATRIX_V0_1.md"
       - ".github/workflows/transition-ledger-durability-matrix.yml"
   workflow_dispatch:
@@ -35,7 +40,7 @@ jobs:
         with:
           workspaces: liminal-db
 
-      - name: Test durability APIs
+      - name: Test durability APIs and anchored negative checkpoint
         working-directory: liminal-db
         run: cargo test -q --locked -p liminal-store --features durability-failpoints --no-fail-fast
 
@@ -44,10 +49,17 @@ jobs:
           python tools/run_transition_durability_matrix.py
           --output artifacts/transition-ledger-durability-${{ matrix.os }}.json
 
+      - name: Run exact verified-negative crash matrix
+        run: >-
+          python tools/run_verified_negative_crash_matrix.py
+          --output artifacts/verified-negative-crash-${{ matrix.os }}.json
+
       - name: Upload durability evidence
         uses: actions/upload-artifact@v4
         with:
           name: transition-ledger-durability-${{ matrix.os }}
-          path: artifacts/transition-ledger-durability-${{ matrix.os }}.json
+          path: |
+            artifacts/transition-ledger-durability-${{ matrix.os }}.json
+            artifacts/verified-negative-crash-${{ matrix.os }}.json
           if-no-files-found: error
           retention-days: 14
