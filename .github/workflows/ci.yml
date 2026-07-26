@@ -2,45 +2,58 @@ name: LiminalDB CI
 
 on:
   push:
-    branches: [ main ]
+    branches: [main]
     paths:
       - '**/*.rs'
-      - 'Cargo.toml'
-      - 'crates/**'
+      - '**/Cargo.toml'
+      - 'Cargo.lock'
+      - 'protocol/**'
+      - 'sdk/rust/**'
+      - 'conformance/**'
+      - 'liminal-db/**'
       - '.github/workflows/ci.yml'
   pull_request:
-    branches: [ main ]
+    branches: [main]
+  workflow_dispatch:
+
+permissions:
+  contents: read
 
 jobs:
-  build:
+  workspace:
     runs-on: ubuntu-latest
-    defaults:
-      run:
-        working-directory: liminal-db
     steps:
       - name: Checkout
         uses: actions/checkout@v6
+        with:
+          persist-credentials: false
 
-      - name: Install system deps
+      - name: Install system dependencies
         run: |
           sudo apt-get update
           sudo apt-get install -y pkg-config libssl-dev
 
       - name: Set up Rust
         uses: dtolnay/rust-toolchain@stable
+        with:
+          components: rustfmt, clippy
 
       - name: Cache cargo
         uses: Swatinem/rust-cache@v2
         with:
-          workspaces: liminal-db
+          workspaces: .
 
-      - name: Cargo check (workspace)
-        run: cargo check --workspace
+      - name: Formatting
+        run: cargo fmt --all --check
 
-      - name: Cargo test (core + store)
-        run: |
-          cargo test -q -p liminal-core --no-fail-fast
-          cargo test -q -p liminal-store --no-fail-fast
+      - name: Cargo check (root workspace, all targets)
+        run: cargo check --workspace --all-targets --locked
+
+      - name: Clippy (root workspace, all targets)
+        run: cargo clippy --workspace --all-targets --locked
+
+      - name: Cargo test (root workspace)
+        run: cargo test --workspace --locked --no-fail-fast
 
       - name: Trustworthy-transition ledger restart demo
-        run: cargo run -q -p liminal-store --example trustworthy_transition_ledger
+        run: cargo run -q --locked -p liminal-store --example trustworthy_transition_ledger
