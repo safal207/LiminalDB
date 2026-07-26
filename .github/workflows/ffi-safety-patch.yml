@@ -1,0 +1,171 @@
+name: FFI Safety Patch
+
+on:
+  pull_request:
+    branches:
+      - agent/product-ci-evidence-hardening-v0-1
+
+permissions:
+  contents: write
+
+jobs:
+  patch:
+    if: github.head_ref == 'agent/ffi-raw-pointer-safety-v0-1'
+    runs-on: ubuntu-latest
+    steps:
+      - name: Checkout exact safety branch
+        uses: actions/checkout@v6
+        with:
+          ref: ${{ github.head_ref }}
+          fetch-depth: 0
+
+      - name: Install system dependencies
+        run: |
+          sudo apt-get update
+          sudo apt-get install -y pkg-config libssl-dev ripgrep
+
+      - name: Set up Rust
+        uses: dtolnay/rust-toolchain@stable
+        with:
+          components: clippy
+
+      - name: Capture and apply FFI safety patch
+        id: patch
+        continue-on-error: true
+        shell: bash
+        run: |
+          mkdir -p artifacts
+          set -o pipefail
+          {
+            echo '=== call sites before patch ==='
+            rg -n -C 2 'liminal_(init|push|pull)\(' \
+              liminal-db/crates/liminal-bridge-abi/src/ffi.rs \
+              liminal-db/crates/liminal-cli/src/main.rs
+
+            python3 - <<'PY'
+          from pathlib import Path
+          import re
+
+          ffi_path = Path('liminal-db/crates/liminal-bridge-abi/src/ffi.rs')
+          cli_path = Path('liminal-db/crates/liminal-cli/src/main.rs')
+          ffi = ffi_path.read_text(encoding='utf-8')
+
+          declarations = {
+              '#[no_mangle]\npub extern "C" fn liminal_init(cfg_cbor: *const u8, len: usize) -> bool {': '''/// Initializes the global bridge from a CBOR configuration buffer.\n///\n/// # Safety\n///\n/// When `len` is non-zero, `cfg_cbor` must be non-null, properly aligned, and\n/// point to `len` readable bytes that remain valid for the duration of this call.\n#[no_mangle]\npub unsafe extern "C" fn liminal_init(cfg_cbor: *const u8, len: usize) -> bool {''',
+              '#[no_mangle]\npub extern "C" fn liminal_push(msg_cbor: *const u8, len: usize) -> usize {': '''/// Pushes one CBOR-encoded protocol message into the bridge.\n///\n/// # Safety\n///\n/// When `len` is non-zero, `msg_cbor` must be non-null, properly aligned, and\n/// point to `len` readable bytes that remain valid for the duration of this call.\n#[no_mangle]\npub unsafe extern "C" fn liminal_push(msg_cbor: *const u8, len: usize) -> usize {''',
+              '#[no_mangle]\npub extern "C" fn liminal_pull(out: *mut u8, cap: usize) -> usize {': '''/// Copies the next CBOR-encoded package into a caller-owned output buffer.\n///\n/// # Safety\n///\n/// When `cap` is non-zero, `out` must be non-null, properly aligned, and point\n/// to `cap` writable bytes. The writable range must not overlap bridge-owned\n/// memory and must remain valid for the duration of this call.\n#[no_mangle]\npub unsafe extern "C" fn liminal_pull(out: *mut u8, cap: usize) -> usize {''',
+          }
+          for old, new in declarations.items():
+              count = ffi.count(old)
+              print('declaration match', old.split('fn ')[-1].split('(')[0], count)
+              if count != 1:
+                  raise SystemExit(f'expected one declaration match, found {count}')
+              ffi = ffi.replace(old, new, 1)
+
+          def wrap_calls(text: str, function_name: str) -> tuple[str, int]:
+              token = function_name + '('
+              cursor = 0
+              wrapped = 0
+              while True:
+                  start = text.find(token, cursor)
+                  if start < 0:
+                      return text, wrapped
+                  prefix = text[max(0, start - 160):start]
+                  if re.search(rf'\bfn\s+{re.escape(function_name)}\s*$', prefix):
+                      cursor = start + len(token)
+                      continue
+                  if prefix.rstrip().endswith('unsafe {'):
+                      cursor = start + len(token)
+                      continue
+
+                  open_paren = start + len(function_name)
+                  depth = 0
+                  quote = None
+                  escaped = False
+                  end = None
+                  for index in range(open_paren, len(text)):
+                      char = text[index]
+                      if quote is not None:
+                          if escaped:
+                              escaped = False
+                          elif char == '\\':
+                              escaped = True
+                          elif char == quote:
+                              quote = None
+                          continue
+                      if char == '"':
+                          quote = char
+                          continue
+                      if char == '(':
+                          depth += 1
+                      elif char == ')':
+                          depth -= 1
+                          if depth == 0:
+                              end = index
+                              break
+                  if end is None:
+                      raise SystemExit(f'unbalanced call for {function_name} at byte {start}')
+
+                  call = text[start:end + 1]
+                  replacement = f'unsafe {{ {call} }}'
+                  text = text[:start] + replacement + text[end + 1:]
+                  cursor = start + len(replacement)
+                  wrapped += 1
+
+          for name in ('liminal_init', 'liminal_push', 'liminal_pull'):
+              ffi, count = wrap_calls(ffi, name)
+              print('ffi calls wrapped', name, count)
+              if count < 1:
+                  raise SystemExit(f'expected at least one in-file caller for {name}')
+
+          cli = cli_path.read_text(encoding='utf-8')
+          for name in ('liminal_init', 'liminal_push', 'liminal_pull'):
+              cli, count = wrap_calls(cli, name)
+              print('cli calls wrapped', name, count)
+              if count < 1:
+                  raise SystemExit(f'expected at least one CLI caller for {name}')
+
+          ffi_path.write_text(ffi, encoding='utf-8')
+          cli_path.write_text(cli, encoding='utf-8')
+          PY
+
+            echo '=== diff after patch ==='
+            git diff --check
+            git diff --stat -- \
+              liminal-db/crates/liminal-bridge-abi/src/ffi.rs \
+              liminal-db/crates/liminal-cli/src/main.rs
+
+            cargo check -p liminal-bridge-abi -p liminal-cli --all-targets --locked
+            cargo clippy -p liminal-bridge-abi -p liminal-cli --all-targets --locked
+          } 2>&1 | tee artifacts/ffi-safety-patch.txt
+
+      - name: Upload FFI patch evidence
+        if: always()
+        uses: actions/upload-artifact@v4
+        with:
+          name: ffi-safety-patch-evidence
+          path: artifacts/ffi-safety-patch.txt
+          if-no-files-found: error
+          retention-days: 14
+
+      - name: Commit only validated Rust safety changes
+        if: steps.patch.outcome == 'success'
+        shell: bash
+        run: |
+          if git diff --quiet -- \
+            liminal-db/crates/liminal-bridge-abi/src/ffi.rs \
+            liminal-db/crates/liminal-cli/src/main.rs; then
+            echo 'No Rust safety changes remain'
+            exit 0
+          fi
+          git config user.name "github-actions[bot]"
+          git config user.email "41898282+github-actions[bot]@users.noreply.github.com"
+          git add \
+            liminal-db/crates/liminal-bridge-abi/src/ffi.rs \
+            liminal-db/crates/liminal-cli/src/main.rs
+          git commit -m 'fix: make raw-pointer FFI contracts explicit'
+          git push origin HEAD:${{ github.head_ref }}
+
+      - name: Fail closed when patch validation fails
+        if: steps.patch.outcome == 'failure'
+        run: exit 1
