@@ -49,7 +49,7 @@ jobs:
 
       - name: Upload failure diagnostics
         if: ${{ steps.tests.outputs.status != '0' }}
-        uses: actions/upload-artifact@v4
+        uses: actions/upload-artifact@v7
         with:
           name: signed-checkpoint-conformance-${{ github.run_id }}
           path: liminal-db/signed-checkpoint-conformance.log

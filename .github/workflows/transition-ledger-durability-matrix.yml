@@ -55,7 +55,7 @@ jobs:
           --output artifacts/verified-negative-crash-${{ matrix.os }}.json
 
       - name: Upload durability evidence
-        uses: actions/upload-artifact@v4
+        uses: actions/upload-artifact@v7
         with:
           name: transition-ledger-durability-${{ matrix.os }}
           path: |
