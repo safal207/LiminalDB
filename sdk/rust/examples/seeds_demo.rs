@@ -8,10 +8,12 @@ async fn main() -> anyhow::Result<()> {
     let client = LiminalClient::connect(opts).await?;
 
     client.auth().await;
-    let seed_id = client.seed_plant(json!({
-        "name": "demo-seed",
-        "parameters": {"boost": 0.2}
-    })).await;
+    let seed_id = client
+        .seed_plant(json!({
+            "name": "demo-seed",
+            "parameters": {"boost": 0.2}
+        }))
+        .await;
     println!("Planted seed {}", seed_id);
 
     client.seed_garden().await;

@@ -9,26 +9,26 @@ pub struct AuthCommand {
     #[serde(default, skip_serializing_if = "Option::is_none")]
     pub namespace: Option<String>,
     pub op: String,
-    pub secret: String
+    pub secret: String,
 }
 
 #[derive(Debug, Clone, Serialize)]
 pub struct AwakenNowCommand {
-    pub op: String
+    pub op: String,
 }
 
 #[derive(Debug, Clone, Serialize)]
 pub struct DreamNowCommand {
     #[serde(default, skip_serializing_if = "Option::is_none")]
     pub intensity: Option<f64>,
-    pub op: String
+    pub op: String,
 }
 
 #[derive(Debug, Clone, Serialize)]
 pub struct IntentInvokeCommand {
     pub kind: String,
     pub op: String,
-    pub payload: serde_json::Value
+    pub payload: serde_json::Value,
 }
 
 #[derive(Debug, Clone, Serialize)]
@@ -36,7 +36,7 @@ pub struct IntentTextCommand {
     #[serde(default, skip_serializing_if = "Option::is_none")]
     pub lang: Option<String>,
     pub op: String,
-    pub text: String
+    pub text: String,
 }
 
 #[derive(Debug, Clone, Serialize)]
@@ -45,49 +45,49 @@ pub struct LqlCommand {
     pub op: String,
     #[serde(default, skip_serializing_if = "Option::is_none")]
     pub parameters: Option<serde_json::Value>,
-    pub query: String
+    pub query: String,
 }
 
 #[derive(Debug, Clone, Serialize)]
 pub struct MirrorReplayCommand {
     #[serde(default, skip_serializing_if = "Option::is_none")]
     pub cursor: Option<String>,
-    pub op: String
+    pub op: String,
 }
 
 #[derive(Debug, Clone, Serialize)]
 pub struct MirrorTimelineCommand {
     pub op: String,
-    pub range: serde_json::Value
+    pub range: serde_json::Value,
 }
 
 #[derive(Debug, Clone, Serialize)]
 pub struct NoeticPeersCommand {
-    pub op: String
+    pub op: String,
 }
 
 #[derive(Debug, Clone, Serialize)]
 pub struct NoeticProposeCommand {
     pub op: String,
-    pub proposal: serde_json::Value
+    pub proposal: serde_json::Value,
 }
 
 #[derive(Debug, Clone, Serialize)]
 pub struct PeerAddCommand {
     pub op: String,
-    pub peer: serde_json::Value
+    pub peer: serde_json::Value,
 }
 
 #[derive(Debug, Clone, Serialize)]
 pub struct PeerListCommand {
-    pub op: String
+    pub op: String,
 }
 
 #[derive(Debug, Clone, Serialize)]
 pub struct QuotaCommand {
     #[serde(default, skip_serializing_if = "Option::is_none")]
     pub namespace: Option<String>,
-    pub op: String
+    pub op: String,
 }
 
 #[derive(Debug, Clone, Serialize)]
@@ -95,26 +95,26 @@ pub struct SeedAbortCommand {
     pub id: String,
     pub op: String,
     #[serde(default, skip_serializing_if = "Option::is_none")]
-    pub reason: Option<String>
+    pub reason: Option<String>,
 }
 
 #[derive(Debug, Clone, Serialize)]
 pub struct SeedGardenCommand {
-    pub op: String
+    pub op: String,
 }
 
 #[derive(Debug, Clone, Serialize)]
 pub struct SeedPlantCommand {
     pub id: String,
     pub op: String,
-    pub spec: serde_json::Value
+    pub spec: serde_json::Value,
 }
 
 #[derive(Debug, Clone, Serialize)]
 pub struct SnapshotCommand {
     pub op: String,
     #[serde(default, skip_serializing_if = "Option::is_none")]
-    pub scope: Option<String>
+    pub scope: Option<String>,
 }
 
 #[derive(Debug, Clone, Serialize)]
@@ -123,20 +123,20 @@ pub struct SubscribeCommand {
     pub op: String,
     #[serde(default, skip_serializing_if = "Option::is_none")]
     pub options: Option<serde_json::Value>,
-    pub pattern: String
+    pub pattern: String,
 }
 
 #[derive(Debug, Clone, Serialize)]
 pub struct SyncNowCommand {
     pub op: String,
     #[serde(default, skip_serializing_if = "Option::is_none")]
-    pub scope: Option<String>
+    pub scope: Option<String>,
 }
 
 #[derive(Debug, Clone, Serialize)]
 pub struct UnsubscribeCommand {
     pub id: String,
-    pub op: String
+    pub op: String,
 }
 
 #[derive(Debug, Clone, Serialize)]
@@ -167,7 +167,7 @@ pub enum CommandEnvelope {
 pub struct AlertEvent {
     pub kind: String,
     pub message: String,
-    pub severity: String
+    pub severity: String,
 }
 
 #[derive(Debug, Clone, Serialize, Deserialize)]
@@ -176,14 +176,14 @@ pub struct AuditEvent {
     pub actor: String,
     #[serde(default, skip_serializing_if = "Option::is_none")]
     pub details: Option<serde_json::Value>,
-    pub kind: String
+    pub kind: String,
 }
 
 #[derive(Debug, Clone, Serialize, Deserialize)]
 pub struct AwakenEvent {
     pub kind: String,
     #[serde(default, skip_serializing_if = "Option::is_none")]
-    pub summary: Option<String>
+    pub summary: Option<String>,
 }
 
 #[derive(Debug, Clone, Serialize, Deserialize)]
@@ -192,13 +192,13 @@ pub struct BaseEvent {
     #[serde(default, skip_serializing_if = "Option::is_none")]
     pub correlation_id: Option<String>,
     pub id: String,
-    pub ts: String
+    pub ts: String,
 }
 
 #[derive(Debug, Clone, Serialize, Deserialize)]
 pub struct CollectiveDreamEvent {
     pub kind: String,
-    pub members: Vec<String>
+    pub members: Vec<String>,
 }
 
 #[derive(Debug, Clone, Serialize, Deserialize)]
@@ -206,19 +206,19 @@ pub struct DreamEvent {
     #[serde(default, skip_serializing_if = "Option::is_none")]
     pub details: Option<serde_json::Value>,
     pub kind: String,
-    pub phase: String
+    pub phase: String,
 }
 
 #[derive(Debug, Clone, Serialize, Deserialize)]
 pub struct EchoEvent {
     pub kind: String,
-    pub status: String
+    pub status: String,
 }
 
 #[derive(Debug, Clone, Serialize, Deserialize)]
 pub struct ExplainEvent {
     pub explanation: String,
-    pub kind: String
+    pub kind: String,
 }
 
 #[derive(Debug, Clone, Serialize, Deserialize)]
@@ -226,19 +226,19 @@ pub struct HarmonyEvent {
     pub kind: String,
     pub score: f64,
     #[serde(default, skip_serializing_if = "Option::is_none")]
-    pub trend: Option<String>
+    pub trend: Option<String>,
 }
 
 #[derive(Debug, Clone, Serialize, Deserialize)]
 pub struct LqlEvent {
     pub kind: String,
-    pub result: Vec<serde_json::Value>
+    pub result: Vec<serde_json::Value>,
 }
 
 #[derive(Debug, Clone, Serialize, Deserialize)]
 pub struct MirrorEvent {
     pub entries: Vec<serde_json::Value>,
-    pub kind: String
+    pub kind: String,
 }
 
 #[derive(Debug, Clone, Serialize, Deserialize)]
@@ -246,7 +246,7 @@ pub struct NoeticEvent {
     #[serde(default, skip_serializing_if = "Option::is_none")]
     pub context: Option<serde_json::Value>,
     pub kind: String,
-    pub stage: String
+    pub stage: String,
 }
 
 #[derive(Debug, Clone, Serialize, Deserialize)]
@@ -255,7 +255,7 @@ pub struct SeedEvent {
     pub status: String,
     #[serde(rename = "yield")]
     #[serde(default, skip_serializing_if = "Option::is_none")]
-    pub r#yield: Option<serde_json::Value>
+    pub r#yield: Option<serde_json::Value>,
 }
 
 #[derive(Debug, Clone, Serialize, Deserialize)]
@@ -263,14 +263,14 @@ pub struct StatusEvent {
     pub kind: String,
     #[serde(default, skip_serializing_if = "Option::is_none")]
     pub metrics: Option<serde_json::Value>,
-    pub state: String
+    pub state: String,
 }
 
 #[derive(Debug, Clone, Serialize, Deserialize)]
 pub struct ViewEvent {
     pub kind: String,
     pub payload: serde_json::Value,
-    pub stream: String
+    pub stream: String,
 }
 
 #[derive(Debug, Clone, Serialize, Deserialize)]
@@ -291,4 +291,3 @@ pub enum EventEnvelope {
     StatusEvent(StatusEvent),
     ViewEvent(ViewEvent),
 }
-
