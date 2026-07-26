@@ -17,48 +17,10 @@ on:
   workflow_dispatch:
 
 permissions:
-  contents: write
+  contents: read
 
 jobs:
-  refresh-root-lockfile:
-    if: github.event_name == 'pull_request' && github.head_ref == 'agent/product-ci-evidence-hardening-v0-1'
-    runs-on: ubuntu-latest
-    outputs:
-      changed: ${{ steps.refresh.outputs.changed }}
-    steps:
-      - name: Checkout exact PR branch
-        uses: actions/checkout@v6
-        with:
-          ref: ${{ github.head_ref }}
-          fetch-depth: 0
-
-      - name: Install system dependencies
-        run: |
-          sudo apt-get update
-          sudo apt-get install -y pkg-config libssl-dev
-
-      - name: Set up Rust
-        uses: dtolnay/rust-toolchain@stable
-
-      - name: Refresh and validate only the canonical root lockfile
-        id: refresh
-        shell: bash
-        run: |
-          cargo check --workspace --all-targets
-          if git diff --quiet -- Cargo.lock; then
-            echo "changed=false" >> "$GITHUB_OUTPUT"
-            exit 0
-          fi
-          git config user.name "github-actions[bot]"
-          git config user.email "41898282+github-actions[bot]@users.noreply.github.com"
-          git add Cargo.lock
-          git commit -m "build: synchronize root Cargo lockfile"
-          git push origin HEAD:${{ github.head_ref }}
-          echo "changed=true" >> "$GITHUB_OUTPUT"
-
   workspace:
-    needs: refresh-root-lockfile
-    if: needs.refresh-root-lockfile.outputs.changed == 'false'
     runs-on: ubuntu-latest
     steps:
       - name: Checkout
@@ -87,18 +49,40 @@ jobs:
         run: cargo fmt --all --check
 
       - name: Cargo check (root workspace, all targets)
-        run: cargo check --workspace --all-targets --locked
+        id: cargo_check
+        continue-on-error: true
+        shell: bash
+        run: |
+          mkdir -p artifacts
+          set -o pipefail
+          cargo check --workspace --all-targets --locked 2>&1 | tee artifacts/cargo-check.txt
+
+      - name: Upload cargo-check failure evidence
+        if: steps.cargo_check.outcome == 'failure'
+        uses: actions/upload-artifact@v4
+        with:
+          name: root-workspace-cargo-check-failure
+          path: artifacts/cargo-check.txt
+          if-no-files-found: error
+          retention-days: 14
 
       - name: Clippy (root workspace, all targets)
+        if: steps.cargo_check.outcome == 'success'
         run: cargo clippy --workspace --all-targets --locked
 
       - name: Cargo test (root workspace)
+        if: steps.cargo_check.outcome == 'success'
         run: cargo test --workspace --locked --no-fail-fast
 
       - name: Trustworthy-transition ledger restart demo
+        if: steps.cargo_check.outcome == 'success'
         run: cargo run -q --locked -p liminal-store --example trustworthy_transition_ledger
 
       - name: Report inherited formatting debt
         if: steps.formatting.outcome == 'failure'
         run: >-
-          echo "::warning title=Inherited Rust formatting debt::cargo fmt --all --check found pre-existing workspace drift. See issue #104."
+          echo "::warning title=Inherited Rust formatting debt::cargo fmt --all --check found pre-existing workspace drift. See issue #104; check, clippy, tests, and the restart demo remain blocking."
+
+      - name: Fail closed on root-workspace check error
+        if: steps.cargo_check.outcome == 'failure'
+        run: exit 1
