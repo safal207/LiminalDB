@@ -1,90 +1,67 @@
-name: Agent rustfmt snapshot
+name: Agent apply root rustfmt
 
 on:
   push:
     branches:
       - agent/root-rustfmt-clean-v0-1
-  pull_request:
-    branches:
-      - main
 
 permissions:
-  contents: read
+  contents: write
+
+concurrency:
+  group: agent-root-rustfmt-clean-v0-1
+  cancel-in-progress: false
 
 jobs:
-  snapshot:
+  apply:
     runs-on: ubuntu-latest
     steps:
-      - name: Checkout
+      - name: Checkout formatter branch
         uses: actions/checkout@v6
         with:
-          persist-credentials: false
+          ref: agent/root-rustfmt-clean-v0-1
+          fetch-depth: 0
 
       - name: Set up Rust
         uses: dtolnay/rust-toolchain@stable
         with:
           components: rustfmt
 
-      - name: Format complete root workspace
+      - name: Apply canonical formatting once
         run: cargo fmt --all
 
-      - name: Capture exact formatting delta
+      - name: Prove exact formatting-only scope
         shell: bash
         run: |
-          python3 - <<'PY'
-          import base64
-          import hashlib
-          import json
-          import subprocess
-          from pathlib import Path
+          git rm .github/workflows/_agent-rustfmt-snapshot.yml
 
-          changed = subprocess.check_output(
-              ["git", "diff", "--name-only", "--diff-filter=ACM"],
-              text=True,
-          ).splitlines()
+          git diff --name-only --diff-filter=ACMD | sort > /tmp/actual-files.txt
+          cat > /tmp/expected-files.txt <<'EOF'
+          .github/workflows/_agent-rustfmt-snapshot.yml
+          conformance/src/main.rs
+          liminal-db/crates/liminal-bridge-net/src/peers.rs
+          liminal-db/crates/liminal-core/src/lql.rs
+          liminal-db/crates/liminal-core/src/reflex/feedback.rs
+          liminal-db/crates/liminal-sensor/src/host.rs
+          liminal-db/crates/liminal-store/examples/trustworthy_transition_ledger.rs
+          liminal-db/crates/liminal-store/examples/verified_negative_crash_harness.rs
+          liminal-db/crates/liminal-store/examples/verified_negative_recover_inspect.rs
+          protocol/src/lib.rs
+          sdk/rust/examples/iot-benchmark.rs
+          sdk/rust/examples/seeds_demo.rs
+          sdk/rust/src/lib.rs
+          sdk/rust/src/protocol.rs
+          EOF
 
-          unexpected = [path for path in changed if not path.endswith(".rs")]
-          if unexpected:
-              raise SystemExit(f"cargo fmt changed non-Rust files: {unexpected}")
-
-          entries = []
-          for path in changed:
-              data = Path(path).read_bytes()
-              entries.append(
-                  {
-                      "path": path,
-                      "sha256": hashlib.sha256(data).hexdigest(),
-                      "content_base64": base64.b64encode(data).decode("ascii"),
-                  }
-              )
-
-          artifact_dir = Path("artifacts")
-          artifact_dir.mkdir(exist_ok=True)
-          (artifact_dir / "rustfmt-files.json").write_text(
-              json.dumps(
-                  {
-                      "base_commit": subprocess.check_output(
-                          ["git", "rev-parse", "HEAD"], text=True
-                      ).strip(),
-                      "changed_file_count": len(entries),
-                      "files": entries,
-                  },
-                  indent=2,
-              )
-              + "\n",
-              encoding="utf-8",
-          )
-          with (artifact_dir / "rustfmt.patch").open("wb") as patch:
-              subprocess.run(["git", "diff", "--binary"], stdout=patch, check=True)
-          PY
-
+          diff -u /tmp/expected-files.txt /tmp/actual-files.txt
           cargo fmt --all --check
           git diff --check
 
-      - name: Upload formatting snapshot
-        uses: actions/upload-artifact@v7
-        with:
-          name: root-rustfmt-snapshot
-          path: artifacts
-          if-no-files-found: error
-          retention-days: 3
+      - name: Commit exact formatter result
+        shell: bash
+        run: |
+          git config user.name "github-actions[bot]"
+          git config user.email "41898282+github-actions[bot]@users.noreply.github.com"
+          git add -A
+          git commit -m "style: format complete root workspace"
+          git push origin HEAD:agent/root-rustfmt-clean-v0-1
