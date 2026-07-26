@@ -39,7 +39,7 @@ jobs:
         run: |
           git rm .github/workflows/_agent-rustfmt-snapshot.yml
 
-          git diff --name-only --diff-filter=ACMD | sort > /tmp/actual-files.txt
+          git diff HEAD --name-only --diff-filter=ACMD | sort > /tmp/actual-files.txt
           cat > /tmp/expected-files.txt <<'EOF'
           .github/workflows/_agent-rustfmt-snapshot.yml
           conformance/src/main.rs
@@ -59,7 +59,7 @@ jobs:
 
           diff -u /tmp/expected-files.txt /tmp/actual-files.txt
           cargo fmt --all --check
-          git diff --check
+          git diff HEAD --check
 
       - name: Commit exact formatter result
         shell: bash
