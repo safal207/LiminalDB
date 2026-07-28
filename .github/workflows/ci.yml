@@ -43,9 +43,7 @@ jobs:
         with:
           workspaces: .
 
-      - name: Formatting advisory
-        id: formatting
-        continue-on-error: true
+      - name: Formatting check (root workspace)
         run: cargo fmt --all --check
 
       - name: Cargo check (root workspace, all targets)
@@ -119,11 +117,6 @@ jobs:
           path: artifacts/restart-demo.txt
           if-no-files-found: error
           retention-days: 14
-
-      - name: Report inherited formatting debt
-        if: steps.formatting.outcome == 'failure'
-        run: >-
-          echo "::warning title=Inherited Rust formatting debt::cargo fmt --all --check found pre-existing workspace drift. See issue #104."
 
       - name: Report inherited Clippy safety debt
         if: steps.clippy.outcome == 'failure'
