@@ -6,135 +6,177 @@
 
 Repository: https://github.com/safal207/LiminalDB
 
+Application: `2026-08-00c`
+
+Canonical requested amount: EUR 50,000
+
 ## One-sentence summary
 
-LiminalDB is an open-source Rust runtime for event-sourced memory, local-first state, and future federated replication across distributed services.
+LiminalDB is an open-source Rust runtime for event-sourced memory and local-first state. The grant-funded transition is a reproducible federated replication model with explicit validation, conflict handling, rejection evidence, and protocol adapter boundaries.
 
-It turns application state into replayable, auditable event streams that can later be synchronized across federated nodes.
+## Claim boundary
+
+LiminalDB already provides an executable local runtime, durable event history, replay paths, CLI and WebSocket interfaces.
+
+It does **not** currently claim completed production federated replication or production ActivityPub / Matrix adapters.
+
+```text
+implemented now:
+  local event-sourced runtime + persistence + replay + inspectable evidence
+
+grant-funded next:
+  remote event envelopes + duplicate/conflict handling + adapter mappings
+```
 
 ## Why this matters
 
 Federated services need more than user-facing protocols.
 
-They also need reusable infrastructure for local state, replication, replay, audit, and recovery.
+They need reusable infrastructure for:
 
-Today, many Fediverse and federated-cloud applications implement their own storage, synchronization, and event history layers inside each application.
+- local state continuity;
+- durable event history;
+- replay and recovery;
+- validated remote events;
+- explicit duplicate and conflict handling;
+- auditable rejection records;
+- protocol adapter boundaries.
 
-That makes new applications harder to build, harder to audit, and harder to evolve.
-
-LiminalDB focuses on a reusable lower layer:
-
-> local-first event memory that can be replayed, inspected, compacted, and eventually replicated across federated nodes.
+Without these properties, every application must invent its own replication and recovery model, and failures may become silent state loss.
 
 ## Fit with NGI Fediversity
 
-NGI Fediversity supports open-source work for federated cloud services and a healthier decentralized internet.
+LiminalDB is intended as an open infrastructure building block for federated and local-first services.
 
-LiminalDB fits this direction because it aims to provide a reusable infrastructure component for federated applications:
+The project contributes:
 
-- local-first event-sourced state;
-- append-only Mirror Timeline for replay and audit;
-- WebSocket interfaces for live state observation;
-- Rust core with clean architecture boundaries;
-- future adapters for ActivityPub, Matrix, and related federated protocols;
-- privacy-aware replication design;
-- open-source documentation and reproducible demos.
+- an executable Rust event-sourced runtime;
+- local persistence, snapshots, and replay;
+- append-only transition evidence;
+- a documented path to remote event validation;
+- planned ActivityPub and Matrix mappings;
+- privacy-aware payload and pruning boundaries;
+- reproducible demos and reviewer commands.
 
-LiminalDB is not a complete Fediverse application.
-
-It is intended as a building block that can help developers create federated services with stronger state history, replay, and synchronization guarantees.
+LiminalDB is not a complete Fediverse application and does not replace existing servers or databases.
 
 ## Reviewer quick path
 
-Start here:
+1. Read [`GRANT_EVIDENCE_INDEX.md`](GRANT_EVIDENCE_INDEX.md).
+2. Read this file.
+3. Read [`FEDERATED_EVENT_SOURCING_ALIGNMENT.md`](FEDERATED_EVENT_SOURCING_ALIGNMENT.md).
+4. Read [`ACTIVITYPUB_MATRIX_INTEGRATION_PLAN.md`](ACTIVITYPUB_MATRIX_INTEGRATION_PLAN.md).
+5. Run the root build and test commands below.
+6. Read [`BUDGET_AND_MILESTONES_FEDIVERSITY.md`](BUDGET_AND_MILESTONES_FEDIVERSITY.md).
+7. Inspect [`GRANT_MILESTONE_TRACKER_FEDIVERSITY.md`](GRANT_MILESTONE_TRACKER_FEDIVERSITY.md).
 
-1. Read this file.
-2. Read `docs/FEDERATED_EVENT_SOURCING_ALIGNMENT.md`.
-3. Read `docs/ACTIVITYPUB_MATRIX_INTEGRATION_PLAN.md`.
-4. Run the existing validation path in the README.
-5. Read `docs/BUDGET_AND_MILESTONES.md`.
+## Current repository evidence
 
-## Current project status
+The repository currently demonstrates:
 
-The current repository already demonstrates:
-
-- Rust core runtime;
+- Rust core runtime and SDK surfaces;
 - event-oriented architecture;
-- Mirror Timeline append-only log;
-- Seed Garden task lifecycle;
-- adaptive feedback / control mechanisms;
-- WebSocket-facing runtime path;
-- CLI demo path;
+- WAL, snapshots, and replay-oriented storage;
+- Mirror Timeline append-only history;
+- trustworthy-transition and signed-checkpoint work;
+- CLI and WebSocket runtime paths;
+- cross-platform crash-consistency evidence;
+- benchmark documentation with explicit caveats;
 - CI-oriented validation commands;
-- documentation and benchmark evidence.
+- Fediversity milestones and reviewer documentation.
 
 Current non-claims:
 
-- no production federated protocol adapter yet;
-- no production ActivityPub integration yet;
-- no production Matrix integration yet;
-- no claim of full CRDT correctness yet;
-- no claim of production security or privacy guarantees before further review;
-- no claim that LiminalDB replaces existing Fediverse servers or databases.
+- no completed production federated replication;
+- no production ActivityPub adapter;
+- no production Matrix adapter;
+- no production distributed consensus claim;
+- no universal CRDT correctness claim;
+- no independent production security certification.
 
-## Target outcome of the grant
-
-The grant will turn the existing runtime into a clearer federated infrastructure component with:
-
-- a stable event envelope format;
-- a documented replication model;
-- a local-first persistence and replay path;
-- a federation adapter design for ActivityPub and Matrix;
-- conflict-resolution and ordering notes;
-- privacy-aware pruning and compaction design;
-- reproducible demo scripts;
-- reviewer-oriented documentation.
-
-## Success criteria
-
-A reviewer or developer should be able to:
-
-- clone the repository;
-- run the local runtime validation;
-- inspect the Mirror Timeline event stream;
-- understand how events can be replayed and audited;
-- understand the proposed bridge to federated protocols;
-- see a clear roadmap from current runtime to federated replication;
-- reuse the architecture notes in another federated service.
-
-## Suggested reviewer command path
+## Reviewer command path
 
 ```bash
 git clone https://github.com/safal207/LiminalDB.git
 cd LiminalDB
-
 cargo build --release -p liminal-cli
-cargo test --workspace
+cargo test --workspace --locked
 ```
 
-On Windows, the current demo entrypoint is:
+Optional quality checks:
+
+```bash
+cargo fmt --all --check
+cargo check --workspace --all-targets --locked
+cargo clippy --workspace --all-targets --locked
+```
+
+Local runtime:
+
+```bash
+./target/release/liminal-cli --store ./data --ws-port 8787
+```
+
+Windows demo:
 
 ```powershell
 powershell -ExecutionPolicy Bypass -File .\scripts\demo-stack.ps1
 ```
 
-Expected high-level story:
+Expected current story:
 
 ```text
-runtime starts
-cells / impulses / seed garden are visible
-mirror timeline records events
-WebSocket path exposes runtime state
-local demo can be replayed and inspected
+local event
+  -> durable append
+  -> timeline inspection
+  -> restart and replay
+  -> reconstructed state
 ```
+
+## Target grant transition
+
+```text
+local replay model
+  -> canonical remote event envelope
+  -> mock Node A / Node B exchange
+  -> duplicate and invalid-event rejection
+  -> auditable conflict outcome
+  -> ActivityPub / Matrix adapter mapping
+```
+
+The grant will produce:
+
+- a stable event envelope draft;
+- local-first persistence and replay documentation;
+- deterministic test fixtures;
+- a mock node-to-node validation path;
+- duplicate detection and rejection records;
+- conflict-handling notes;
+- ActivityPub and Matrix mapping notes;
+- adapter interface and privacy boundaries;
+- reviewer demos and final report.
+
+## Success criteria
+
+A reviewer should be able to:
+
+- build and test the current local runtime;
+- inspect local event history and replay behavior;
+- distinguish current implementation from future federation work;
+- run a grant-funded two-node mock exchange;
+- observe accepted, duplicate, conflicting, and invalid remote events;
+- verify that every transition leaves an auditable record;
+- understand where protocol adapters connect without coupling them to the core runtime.
+
+## Administrative clarification
+
+The canonical request is **EUR 50,000**. If the acknowledgement email renders the amount field as empty, the requested amount is recorded here and in `BUDGET_AND_MILESTONES_FEDIVERSITY.md`; this does not change project scope.
 
 ## Grant proposal reference
 
-Submitted application:
-
 ```text
-Application 2026-08-00c — LiminalDB: Federated Event-Sourced Memory Layer
+Application: 2026-08-00c
 Fund: NGI Fediversity
 Requested amount: EUR 50,000
-Correct repository: https://github.com/safal207/LiminalDB
+Repository: https://github.com/safal207/LiminalDB
 ```
