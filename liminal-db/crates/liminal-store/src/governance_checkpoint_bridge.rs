@@ -9,15 +9,13 @@ use crate::{
     TrustedCheckpointKey, TrustedKeyRegistry, TrustworthyTransitionLedger,
 };
 
-pub const GOVERNANCE_ENVELOPE_SCHEMA: &str =
-    "liminalosai-governance-transition-envelope-v0.1";
+pub const GOVERNANCE_ENVELOPE_SCHEMA: &str = "liminalosai-governance-transition-envelope-v0.1";
 pub const GOVERNANCE_RECEIPT_SCHEMA: &str =
     "liminaldb-liminalosai-governance-checkpoint-receipt-v0.1";
 
 const SUBJECT_ID: &str = "liminalosai:durable-governance";
 const VERIFIED_STATUS: &str = "LOCAL_SIGNATURE_VERIFIED";
-const ZERO_SHA256: &str =
-    "0000000000000000000000000000000000000000000000000000000000000000";
+const ZERO_SHA256: &str = "0000000000000000000000000000000000000000000000000000000000000000";
 
 #[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
 pub struct GovernanceTransitionEnvelopeBody {
@@ -136,9 +134,7 @@ impl GovernanceCheckpointReceipt {
             false,
         )?;
         if digest_cbor(&self.body)? != self.receipt_ref {
-            return Err(GovernanceCheckpointBridgeError::InvalidField(
-                "receipt_ref",
-            ));
+            return Err(GovernanceCheckpointBridgeError::InvalidField("receipt_ref"));
         }
         Ok(())
     }
@@ -325,10 +321,7 @@ fn validate_raw_sha(
     Ok(())
 }
 
-fn validate_ref(
-    value: &str,
-    label: &'static str,
-) -> Result<(), GovernanceCheckpointBridgeError> {
+fn validate_ref(value: &str, label: &'static str) -> Result<(), GovernanceCheckpointBridgeError> {
     let valid = value.len() == 71
         && value.starts_with("sha256:")
         && value.as_bytes()[7..]
