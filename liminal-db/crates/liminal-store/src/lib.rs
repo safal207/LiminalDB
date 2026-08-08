@@ -2,6 +2,7 @@ mod checkpoint;
 mod codec;
 mod durability;
 mod gc;
+mod governance_checkpoint_bridge;
 mod journal_impl;
 mod snapshot;
 mod snapshot_durability;
@@ -18,6 +19,11 @@ pub use checkpoint::{
 pub use codec::{decode_delta, encode_delta};
 pub use durability::{trigger_durability_failpoint, DurabilityFailpoint};
 pub use gc::gc_compact;
+pub use governance_checkpoint_bridge::{
+    append_governance_checkpoint, GovernanceCheckpointBridgeError, GovernanceCheckpointBundle,
+    GovernanceCheckpointReceipt, GovernanceCheckpointReceiptBody, GovernanceTransitionEnvelope,
+    GovernanceTransitionEnvelopeBody, GOVERNANCE_ENVELOPE_SCHEMA, GOVERNANCE_RECEIPT_SCHEMA,
+};
 pub use journal_impl::{DiskJournal, SnapshotInfo, StoreStats};
 pub use snapshot::{create_snapshot, load_snapshot, ClusterFieldSeed};
 pub use snapshot_durability::{
