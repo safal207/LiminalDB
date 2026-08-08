@@ -1,0 +1,80 @@
+name: LiminalOSAI Governance Checkpoint Bridge
+
+on:
+  pull_request:
+    paths:
+      - 'liminal-db/crates/liminal-store/src/governance_checkpoint_bridge.rs'
+      - 'liminal-db/crates/liminal-store/src/lib.rs'
+      - 'liminal-db/crates/liminal-store/examples/liminalosai_governance_checkpoint_bridge.rs'
+      - 'liminal-db/crates/liminal-store/src/checkpoint.rs'
+      - 'liminal-db/crates/liminal-store/src/trustworthy_transition.rs'
+      - 'docs/integrations/LIMINALOSAI_GOVERNANCE_CHECKPOINT_BRIDGE_V0_1.md'
+      - '.github/workflows/liminalosai-governance-checkpoint-bridge.yml'
+  workflow_dispatch:
+
+permissions:
+  contents: read
+
+jobs:
+  verify:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+        with:
+          persist-credentials: false
+
+      - uses: dtolnay/rust-toolchain@stable
+
+      - uses: Swatinem/rust-cache@v2
+        with:
+          workspaces: liminal-db
+
+      - name: Record exact head
+        run: echo "${GITHUB_SHA}"
+
+      - name: Run bridge unit tests
+        working-directory: liminal-db
+        run: cargo test -q --locked -p liminal-store governance_checkpoint_bridge --no-fail-fast
+
+      - name: Re-run liminal-store regression
+        working-directory: liminal-db
+        run: cargo test -q --locked -p liminal-store --no-fail-fast
+
+      - name: Prove restart and signed-checkpoint sequence
+        shell: bash
+        run: |
+          set -euo pipefail
+          root="${RUNNER_TEMP}/liminalosai-governance-ledger"
+          export LIMINALDB_TEST_SIGNING_SEED_HEX="0707070707070707070707070707070707070707070707070707070707070707"
+
+          export LIMINALDB_CHECKPOINT_ISSUED_AT_MS=11
+          cat > "${RUNNER_TEMP}/reserve.json" <<'JSON'
+          {"schema":"liminalosai-governance-transition-envelope-v0.1","root_id_sha256":"1111111111111111111111111111111111111111111111111111111111111111","transition_kind":"reserve","generation_before":0,"generation_after":0,"world_before_sha256":"2222222222222222222222222222222222222222222222222222222222222222","world_after_sha256":"2222222222222222222222222222222222222222222222222222222222222222","reservation_sha256":"4444444444444444444444444444444444444444444444444444444444444444","operation_sha256":"5555555555555555555555555555555555555555555555555555555555555555","upstream_receipt_sha256":"6666666666666666666666666666666666666666666666666666666666666666","captured_at_ms":10}
+          JSON
+          cargo run -q --manifest-path liminal-db/Cargo.toml -p liminal-store --example liminalosai_governance_checkpoint_bridge -- "${root}" < "${RUNNER_TEMP}/reserve.json" > "${RUNNER_TEMP}/reserve.out.json"
+
+          export LIMINALDB_CHECKPOINT_ISSUED_AT_MS=12
+          cat > "${RUNNER_TEMP}/commit.json" <<'JSON'
+          {"schema":"liminalosai-governance-transition-envelope-v0.1","root_id_sha256":"1111111111111111111111111111111111111111111111111111111111111111","transition_kind":"commit","generation_before":0,"generation_after":1,"world_before_sha256":"2222222222222222222222222222222222222222222222222222222222222222","world_after_sha256":"3333333333333333333333333333333333333333333333333333333333333333","reservation_sha256":"4444444444444444444444444444444444444444444444444444444444444444","operation_sha256":"5555555555555555555555555555555555555555555555555555555555555555","upstream_receipt_sha256":"7777777777777777777777777777777777777777777777777777777777777777","captured_at_ms":11}
+          JSON
+          cargo run -q --manifest-path liminal-db/Cargo.toml -p liminal-store --example liminalosai_governance_checkpoint_bridge -- "${root}" < "${RUNNER_TEMP}/commit.json" > "${RUNNER_TEMP}/commit.out.json"
+
+          python3 - <<'PY'
+          import json, os
+          from pathlib import Path
+          base = Path(os.environ['RUNNER_TEMP'])
+          first = json.loads((base / 'reserve.out.json').read_text())
+          second = json.loads((base / 'commit.out.json').read_text())
+          assert first['receipt']['body']['last_sequence'] == 1
+          assert second['receipt']['body']['last_sequence'] == 2
+          assert first['receipt']['body']['event_chain_head'] != second['receipt']['body']['event_chain_head']
+          assert first['receipt']['body']['verification_status'] == 'LOCAL_SIGNATURE_VERIFIED'
+          assert second['receipt']['body']['verification_status'] == 'LOCAL_SIGNATURE_VERIFIED'
+          assert second['receipt']['body']['generation_before'] == 0
+          assert second['receipt']['body']['generation_after'] == 1
+          assert second['checkpoint']['manifest_ref'] == second['receipt']['body']['checkpoint_ref']
+          assert second['checkpoint']['body']['event_chain_head'] == second['receipt']['body']['event_chain_head']
+          secret = os.environ['LIMINALDB_TEST_SIGNING_SEED_HEX']
+          assert secret not in json.dumps(first)
+          assert secret not in json.dumps(second)
+          PY
