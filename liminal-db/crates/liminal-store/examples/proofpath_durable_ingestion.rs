@@ -2,14 +2,12 @@ use std::env;
 use std::fs;
 use std::path::PathBuf;
 
-use liminal_store::{
-    ProofPathAppendOutcome, ProofPathDurableInput, ProofPathDurableLedger,
-};
+use liminal_store::{ProofPathAppendOutcome, ProofPathDurableInput, ProofPathDurableLedger};
 use serde_json::json;
 
 fn usage() -> ! {
     eprintln!(
-        "usage:\n  proofpath_durable_ingestion ingest <root> <namespace> <logical_operation_id> <event_file> <admission_file> <source_receipt_ref> <valid_time_ms> <transaction_time_ms> <storage_admission_ref>\n  proofpath_durable_ingestion inspect <root> <namespace> <logical_operation_id> <event_output> <admission_output>"
+        "usage:\n  proofpath_durable_ingestion ingest <root> <namespace> <logical_operation_id> <event_file> <admission_file> <source_receipt_ref> <valid_time_ms> <transaction_time_ms> <storage_admission_ref>\n  proofpath_durable_ingestion inspect <root> <namespace> <logical_operation_id> <event_output> <admission_output> <summary_output>"
     );
     std::process::exit(2);
 }
@@ -32,8 +30,8 @@ fn main() -> Result<(), Box<dyn std::error::Error>> {
                 usage();
             }
             let root = PathBuf::from(&args[2]);
-            let namespace = &args[3];
-            let logical_operation_id = &args[4];
+            let namespace = args[3].clone();
+            let logical_operation_id = args[4].clone();
             let event_bytes = fs::read(&args[5])?;
             let admission_bytes = fs::read(&args[6])?;
             let source_receipt_ref = args[7].clone();
@@ -41,9 +39,9 @@ fn main() -> Result<(), Box<dyn std::error::Error>> {
             let transaction_time_ms = parse_u64(&args[9], "transaction_time_ms")?;
             let storage_admission_ref = args[10].clone();
 
-            let mut ledger = ProofPathDurableLedger::open(&root, namespace.clone())?;
+            let mut ledger = ProofPathDurableLedger::open(&root, namespace)?;
             let outcome = ledger.append(ProofPathDurableInput {
-                logical_operation_id: logical_operation_id.clone(),
+                logical_operation_id,
                 source_event_bytes: event_bytes,
                 admission_report_bytes: admission_bytes,
                 source_receipt_ref,
@@ -82,15 +80,15 @@ fn main() -> Result<(), Box<dyn std::error::Error>> {
                 usage();
             }
             let root = PathBuf::from(&args[2]);
-            let namespace = &args[3];
-            let logical_operation_id = &args[4];
+            let namespace = args[3].clone();
+            let logical_operation_id = args[4].clone();
             let event_output = PathBuf::from(&args[5]);
             let admission_output = PathBuf::from(&args[6]);
             let summary_output = PathBuf::from(&args[7]);
 
-            let ledger = ProofPathDurableLedger::open(&root, namespace.clone())?;
+            let ledger = ProofPathDurableLedger::open(&root, namespace)?;
             let record = ledger
-                .get(logical_operation_id)
+                .get(&logical_operation_id)
                 .ok_or_else(|| format!("logical operation not found: {logical_operation_id}"))?;
             if let Some(parent) = event_output.parent() {
                 fs::create_dir_all(parent)?;
