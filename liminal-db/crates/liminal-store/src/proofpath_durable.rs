@@ -11,13 +11,10 @@ pub const PROOFPATH_DURABLE_RECORD_SCHEMA: &str = "liminaldb.proofpath-durable-r
 pub const PROOFPATH_DURABLE_PROFILE: &str = "org.liminaldb.proofpath-durable-ledger.v0.1";
 pub const PROOFPATH_PRODUCER_REPOSITORY: &str = "safal207/ProofPath";
 pub const PROOFPATH_CAPABILITY_ID: &str = "proofpath.scig.v0.1";
-pub const PROOFPATH_CAPABILITY_COMMIT: &str =
-    "685d50e256a5125a21f4c4584b326411caaa64ad";
+pub const PROOFPATH_CAPABILITY_COMMIT: &str = "685d50e256a5125a21f4c4584b326411caaa64ad";
 pub const LIMINALDB_CONSUMER_REPOSITORY: &str = "safal207/LiminalDB";
-pub const LIMINALDB_PROOFPATH_IMPORT_COMMIT: &str =
-    "00580ff097dee61b45ad3c8a3c36ae5f548f572d";
-pub const LIMINALDB_AUDIT_EVENT_CONTRACT_BLOB: &str =
-    "fd733971aaae089df770062bcf7f2c2d6d19ca1d";
+pub const LIMINALDB_PROOFPATH_IMPORT_COMMIT: &str = "00580ff097dee61b45ad3c8a3c36ae5f548f572d";
+pub const LIMINALDB_AUDIT_EVENT_CONTRACT_BLOB: &str = "fd733971aaae089df770062bcf7f2c2d6d19ca1d";
 pub const PROOFPATH_PERSISTENCE_SCOPE: &str = "local_test_only";
 const RECORD_KIND: &str = "proofpath.scig.verification.observed";
 const LEDGER_DIR: &str = "proofpath-durable-v0.1";
@@ -435,10 +432,7 @@ fn ingestion_key(namespace: &str, logical_operation_id: &str) -> String {
     sha256_ref(seed.as_bytes())
 }
 
-fn validate_sha256_ref(
-    reference: &str,
-    label: &'static str,
-) -> Result<(), ProofPathDurableError> {
+fn validate_sha256_ref(reference: &str, label: &'static str) -> Result<(), ProofPathDurableError> {
     let bytes = reference.as_bytes();
     let valid = bytes.len() == 71
         && reference.starts_with("sha256:")
