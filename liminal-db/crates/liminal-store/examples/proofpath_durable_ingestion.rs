@@ -2,7 +2,9 @@ use std::env;
 use std::fs;
 use std::path::PathBuf;
 
-use liminal_store::{ProofPathAppendOutcome, ProofPathDurableInput, ProofPathDurableLedger};
+use liminal_store::{
+    ProofPathAppendOutcome, ProofPathDurableError, ProofPathDurableInput, ProofPathDurableLedger,
+};
 use serde_json::json;
 
 fn usage() -> ! {
@@ -18,7 +20,31 @@ fn parse_u64(value: &str, label: &str) -> Result<u64, Box<dyn std::error::Error>
         .map_err(|error| format!("invalid {label}: {error}").into())
 }
 
-fn main() -> Result<(), Box<dyn std::error::Error>> {
+fn durable_error_code(error: &ProofPathDurableError) -> &'static str {
+    match error {
+        ProofPathDurableError::IdempotencyConflict => "IDEMPOTENCY_CONFLICT",
+        ProofPathDurableError::PoisonedAfterStorageFailure => "POISONED_AFTER_STORAGE_FAILURE",
+        ProofPathDurableError::Storage(_) => "STORAGE_ERROR",
+        ProofPathDurableError::InvalidTemporalOrder => "INVALID_TEMPORAL_ORDER",
+        ProofPathDurableError::AuthorityBoundaryViolation => "AUTHORITY_BOUNDARY_VIOLATION",
+        _ => "DURABLE_CONTRACT_ERROR",
+    }
+}
+
+fn append_with_classification(
+    ledger: &mut ProofPathDurableLedger,
+    input: ProofPathDurableInput,
+) -> Result<ProofPathAppendOutcome, Box<dyn std::error::Error>> {
+    match ledger.append(input) {
+        Ok(outcome) => Ok(outcome),
+        Err(error) => {
+            eprintln!("ERROR_CODE {}", durable_error_code(&error));
+            Err(Box::new(error))
+        }
+    }
+}
+
+fn run() -> Result<(), Box<dyn std::error::Error>> {
     let args: Vec<String> = env::args().collect();
     let Some(command) = args.get(1).map(String::as_str) else {
         usage();
@@ -40,15 +66,18 @@ fn main() -> Result<(), Box<dyn std::error::Error>> {
             let storage_admission_ref = args[10].clone();
 
             let mut ledger = ProofPathDurableLedger::open(&root, namespace)?;
-            let outcome = ledger.append(ProofPathDurableInput {
-                logical_operation_id,
-                source_event_bytes: event_bytes,
-                admission_report_bytes: admission_bytes,
-                source_receipt_ref,
-                valid_time_ms,
-                transaction_time_ms,
-                storage_admission_ref,
-            })?;
+            let outcome = append_with_classification(
+                &mut ledger,
+                ProofPathDurableInput {
+                    logical_operation_id,
+                    source_event_bytes: event_bytes,
+                    admission_report_bytes: admission_bytes,
+                    source_receipt_ref,
+                    valid_time_ms,
+                    transaction_time_ms,
+                    storage_admission_ref,
+                },
+            )?;
             let status = match &outcome {
                 ProofPathAppendOutcome::Inserted(_) => "INSERTED",
                 ProofPathAppendOutcome::AlreadyPresent(_) => "ALREADY_PRESENT",
@@ -129,4 +158,11 @@ fn main() -> Result<(), Box<dyn std::error::Error>> {
         _ => usage(),
     }
     Ok(())
+}
+
+fn main() {
+    if let Err(error) = run() {
+        eprintln!("ERROR {error}");
+        std::process::exit(1);
+    }
 }
