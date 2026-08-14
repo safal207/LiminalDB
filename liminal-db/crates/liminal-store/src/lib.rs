@@ -4,6 +4,7 @@ mod durability;
 mod gc;
 mod governance_checkpoint_bridge;
 mod journal_impl;
+mod proofpath_durable;
 mod snapshot;
 mod snapshot_durability;
 mod store_debug;
@@ -25,6 +26,13 @@ pub use governance_checkpoint_bridge::{
     GovernanceTransitionEnvelopeBody, GOVERNANCE_ENVELOPE_SCHEMA, GOVERNANCE_RECEIPT_SCHEMA,
 };
 pub use journal_impl::{DiskJournal, SnapshotInfo, StoreStats};
+pub use proofpath_durable::{
+    ProofPathAppendOutcome, ProofPathDurableError, ProofPathDurableInput, ProofPathDurableLedger,
+    ProofPathDurableRecord, ProofPathDurableRecordBody, LIMINALDB_AUDIT_EVENT_CONTRACT_BLOB,
+    LIMINALDB_CONSUMER_REPOSITORY, LIMINALDB_PROOFPATH_IMPORT_COMMIT, PROOFPATH_CAPABILITY_COMMIT,
+    PROOFPATH_CAPABILITY_ID, PROOFPATH_DURABLE_PROFILE, PROOFPATH_DURABLE_RECORD_SCHEMA,
+    PROOFPATH_PERSISTENCE_SCOPE, PROOFPATH_PRODUCER_REPOSITORY,
+};
 pub use snapshot::{create_snapshot, load_snapshot, ClusterFieldSeed};
 pub use snapshot_durability::{
     recover_interrupted_snapshot_replace, replace_snapshot_bytes_crash_safe,
