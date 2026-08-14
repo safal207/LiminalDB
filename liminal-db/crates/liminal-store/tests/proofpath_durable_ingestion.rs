@@ -46,7 +46,11 @@ fn exact_artifact_survives_restart_byte_for_byte() {
     let inserted = {
         let mut ledger = ProofPathDurableLedger::open(root.path(), "system-005").expect("open");
         let outcome = ledger
-            .append(input(source_event(), admission_report(), TRANSACTION_TIME_MS))
+            .append(input(
+                source_event(),
+                admission_report(),
+                TRANSACTION_TIME_MS,
+            ))
             .expect("append");
         assert!(outcome.inserted());
         assert_eq!(ledger.event_count(), 1);
@@ -60,7 +64,10 @@ fn exact_artifact_survives_restart_byte_for_byte() {
     assert_eq!(recovered.body.admission_report_bytes, admission_report());
     assert_eq!(recovered.body.valid_time_ms, VALID_TIME_MS);
     assert_eq!(recovered.body.transaction_time_ms, TRANSACTION_TIME_MS);
-    assert_eq!(recovered.body.producer_capability_commit, PROOFPATH_CAPABILITY_COMMIT);
+    assert_eq!(
+        recovered.body.producer_capability_commit,
+        PROOFPATH_CAPABILITY_COMMIT
+    );
     assert_eq!(
         recovered.body.consumer_import_commit,
         LIMINALDB_PROOFPATH_IMPORT_COMMIT
@@ -69,7 +76,10 @@ fn exact_artifact_survives_restart_byte_for_byte() {
         recovered.body.consumer_contract_blob_sha,
         LIMINALDB_AUDIT_EVENT_CONTRACT_BLOB
     );
-    assert_eq!(recovered.body.persistence_scope, PROOFPATH_PERSISTENCE_SCOPE);
+    assert_eq!(
+        recovered.body.persistence_scope,
+        PROOFPATH_PERSISTENCE_SCOPE
+    );
     assert!(recovered.body.storage_write_authorized);
     assert!(!recovered.body.execution_authorized);
     assert!(!recovered.body.mutation_authorized);
@@ -82,16 +92,27 @@ fn same_operation_and_same_artifact_is_idempotent_after_restart() {
     {
         let mut ledger = ProofPathDurableLedger::open(root.path(), "system-005").expect("open");
         let first = ledger
-            .append(input(source_event(), admission_report(), TRANSACTION_TIME_MS))
+            .append(input(
+                source_event(),
+                admission_report(),
+                TRANSACTION_TIME_MS,
+            ))
             .expect("first append");
         assert!(matches!(first, ProofPathAppendOutcome::Inserted(_)));
     }
 
     let mut reopened = ProofPathDurableLedger::open(root.path(), "system-005").expect("reopen");
-    let mut retry = input(source_event(), admission_report(), TRANSACTION_TIME_MS + 60_000);
+    let mut retry = input(
+        source_event(),
+        admission_report(),
+        TRANSACTION_TIME_MS + 60_000,
+    );
     retry.storage_admission_ref = sha256_ref(b"system-005-retry-storage-admission");
     let outcome = reopened.append(retry).expect("idempotent retry");
-    assert!(matches!(outcome, ProofPathAppendOutcome::AlreadyPresent(_)));
+    assert!(matches!(
+        outcome,
+        ProofPathAppendOutcome::AlreadyPresent(_)
+    ));
     assert_eq!(reopened.event_count(), 1);
     assert_eq!(
         outcome.record().body.transaction_time_ms,
@@ -105,7 +126,11 @@ fn same_operation_with_changed_artifact_fails_closed() {
     let root = tempdir().expect("tempdir");
     let mut ledger = ProofPathDurableLedger::open(root.path(), "system-005").expect("open");
     ledger
-        .append(input(source_event(), admission_report(), TRANSACTION_TIME_MS))
+        .append(input(
+            source_event(),
+            admission_report(),
+            TRANSACTION_TIME_MS,
+        ))
         .expect("first append");
 
     let error = ledger
@@ -115,7 +140,10 @@ fn same_operation_with_changed_artifact_fails_closed() {
             TRANSACTION_TIME_MS + 60_000,
         ))
         .expect_err("changed evidence under same operation must conflict");
-    assert!(matches!(error, ProofPathDurableError::IdempotencyConflict));
+    assert!(matches!(
+        error,
+        ProofPathDurableError::IdempotencyConflict
+    ));
     assert_eq!(ledger.event_count(), 1);
 }
 
@@ -125,7 +153,11 @@ fn namespaces_are_physically_and_semantically_isolated() {
     {
         let mut alpha = ProofPathDurableLedger::open(root.path(), "tenant-alpha").expect("alpha");
         alpha
-            .append(input(source_event(), admission_report(), TRANSACTION_TIME_MS))
+            .append(input(
+                source_event(),
+                admission_report(),
+                TRANSACTION_TIME_MS,
+            ))
             .expect("alpha append");
     }
     {
@@ -143,7 +175,11 @@ fn namespaces_are_physically_and_semantically_isolated() {
     assert_eq!(alpha.event_count(), 1);
     assert_eq!(beta.event_count(), 1);
     assert_eq!(
-        alpha.get(LOGICAL_OPERATION).unwrap().body.source_event_bytes,
+        alpha
+            .get(LOGICAL_OPERATION)
+            .unwrap()
+            .body
+            .source_event_bytes,
         source_event()
     );
     assert_eq!(
@@ -167,7 +203,10 @@ fn invalid_bitemporal_order_is_rejected_before_write() {
     let error = ledger
         .append(input(source_event(), admission_report(), VALID_TIME_MS - 1))
         .expect_err("transaction time before valid time must fail");
-    assert!(matches!(error, ProofPathDurableError::InvalidTemporalOrder));
+    assert!(matches!(
+        error,
+        ProofPathDurableError::InvalidTemporalOrder
+    ));
     assert_eq!(ledger.event_count(), 0);
 }
 
@@ -177,7 +216,11 @@ fn replay_rejects_authority_escalation_even_with_valid_hashes() {
     let first = {
         let mut ledger = ProofPathDurableLedger::open(root.path(), "system-005").expect("open");
         ledger
-            .append(input(source_event(), admission_report(), TRANSACTION_TIME_MS))
+            .append(input(
+                source_event(),
+                admission_report(),
+                TRANSACTION_TIME_MS,
+            ))
             .expect("append")
             .record()
             .clone()
@@ -193,13 +236,17 @@ fn replay_rejects_authority_escalation_even_with_valid_hashes() {
     {
         let mut raw = liminal_store::Store::open(&ledger_root).expect("open raw store");
         let bytes = serde_cbor::to_vec(&malicious).expect("encode malicious record");
-        raw.append(&bytes).expect("append structurally valid malicious record");
+        raw.append(&bytes)
+            .expect("append structurally valid malicious record");
     }
 
     let error = ProofPathDurableLedger::open(root.path(), "system-005")
         .err()
         .expect("replay must reject authority escalation");
-    assert!(matches!(error, ProofPathDurableError::AuthorityBoundaryViolation));
+    assert!(matches!(
+        error,
+        ProofPathDurableError::AuthorityBoundaryViolation
+    ));
 
     fs::remove_dir_all(root.path()).ok();
 }
