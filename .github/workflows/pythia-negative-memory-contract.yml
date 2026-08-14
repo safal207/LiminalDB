@@ -6,6 +6,9 @@ on:
       - .github/workflows/pythia-negative-memory-contract.yml
       - scripts/validate_pythia_negative_memory.py
       - tests/test_validate_pythia_negative_memory.py
+      - scripts/validate_lotus_memory.py
+      - tests/test_validate_lotus_memory.py
+      - sdk/ts/src/protocol-types.ts
   workflow_dispatch:
 
 permissions:
@@ -20,11 +23,18 @@ jobs:
     runs-on: ubuntu-latest
     timeout-minutes: 10
     steps:
-      - uses: actions/checkout@v4
+      - uses: actions/checkout@fbc6f3992d24b796d5a048ff273f7fcc4a7b6c09 # v5
         with:
           persist-credentials: false
 
-      - name: Run old and new import contract tests
+      - name: Require Lotus import v0.2 parent contract
+        shell: bash
+        run: |
+          set -euo pipefail
+          grep -F 'liminaldb-lotus-import-check-v0.2' scripts/validate_lotus_memory.py
+          test "$(git hash-object sdk/ts/src/protocol-types.ts)" = "fd733971aaae089df770062bcf7f2c2d6d19ca1d"
+
+      - name: Run parent and Pythia import contract tests
         shell: bash
         run: |
           set -euo pipefail
@@ -38,7 +48,7 @@ jobs:
             tests/test_validate_pythia_negative_memory.py \
             -v 2>&1 | tee contract-tests.log
 
-      - name: Emit deterministic dry-run import report
+      - name: Emit deterministic Pythia dry-run import report
         shell: bash
         run: |
           set -euo pipefail
@@ -72,7 +82,7 @@ jobs:
           ' reports/liminaldb-pythia-negative-import-check.json >/dev/null
           sha256sum reports/* contract-tests.log > reports/SHA256SUMS.txt
 
-      - uses: actions/upload-artifact@v4
+      - uses: actions/upload-artifact@ea165f8d65b6e75b540449e92b4886f43607fa02 # v4
         with:
           name: liminaldb-pythia-negative-${{ github.run_id }}
           path: reports/
