@@ -1,0 +1,121 @@
+name: ProofPath AuditEvent Import Contract
+
+on:
+  workflow_dispatch:
+  pull_request:
+    branches:
+      - main
+    paths:
+      - .github/workflows/proofpath-audit-import-contract.yml
+      - scripts/validate_proofpath_audit_import.py
+      - tests/test_validate_proofpath_audit_import.py
+      - docs/integrations/PROOFPATH_AUDIT_IMPORT.md
+      - sdk/ts/src/protocol-types.ts
+
+permissions:
+  contents: read
+
+concurrency:
+  group: proofpath-audit-import-${{ github.ref }}
+  cancel-in-progress: true
+
+jobs:
+  verify:
+    name: Verify artifact-only ProofPath AuditEvent import
+    runs-on: ubuntu-latest
+    timeout-minutes: 10
+    env:
+      CONSUMER_COMMIT: ${{ github.event.pull_request.head.sha || github.sha }}
+    steps:
+      - name: Checkout exact subject revision
+        uses: actions/checkout@fbc6f3992d24b796d5a048ff273f7fcc4a7b6c09 # v5
+        with:
+          ref: ${{ env.CONSUMER_COMMIT }}
+          fetch-depth: 0
+          persist-credentials: false
+
+      - name: Verify exact identity and AuditEvent contract bytes
+        shell: bash
+        run: |
+          set -euo pipefail
+          test "$(git rev-parse HEAD)" = "$CONSUMER_COMMIT"
+          test "$(git hash-object sdk/ts/src/protocol-types.ts)" = "fd733971aaae089df770062bcf7f2c2d6d19ca1d"
+
+      - name: Compile and run fail-closed regressions
+        shell: bash
+        run: |
+          set -euo pipefail
+          python3 -m py_compile \
+            scripts/validate_proofpath_audit_import.py \
+            tests/test_validate_proofpath_audit_import.py
+          python3 -m unittest tests/test_validate_proofpath_audit_import.py -v 2>&1 | tee proofpath-import-tests.log
+
+      - name: Emit deterministic dry-run event and compatibility report
+        shell: bash
+        run: |
+          set -euo pipefail
+          mkdir -p reports/proofpath
+          CONSUMER_COMMIT="$CONSUMER_COMMIT" python3 - <<'PY'
+          import importlib.util
+          import json
+          import os
+          from pathlib import Path
+
+          def load(name, path):
+              spec = importlib.util.spec_from_file_location(name, path)
+              module = importlib.util.module_from_spec(spec)
+              assert spec and spec.loader
+              spec.loader.exec_module(module)
+              return module
+
+          validator = load('validator', Path('scripts/validate_proofpath_audit_import.py'))
+          fixtures = load('fixtures', Path('tests/test_validate_proofpath_audit_import.py'))
+          event = fixtures.valid_event()
+          out = Path('reports/proofpath')
+          events = out / 'proofpath-audit-events.jsonl'
+          events.write_text(json.dumps(event, sort_keys=True) + '\n', encoding='utf-8')
+          loaded = validator.load_events(events)
+          summary = validator.build_summary(
+              loaded,
+              consumer_commit=os.environ['CONSUMER_COMMIT'],
+          )
+          (out / 'import-check.json').write_text(
+              json.dumps(summary, indent=2, sort_keys=True) + '\n', encoding='utf-8'
+          )
+          PY
+
+          jq -e '
+            .schema_version == "liminaldb-proofpath-import-check-v0.1" and
+            .mode == "dry_run" and
+            .write_performed == false and
+            .event_count == 1 and
+            .source.capability_id == "proofpath.scig.v0.1" and
+            .source.verification_class == "native_recomputed" and
+            .compatibility.contract_blob_matches_current_checkout == true and
+            .compatibility.historical_snapshot_is_semantic_key == false and
+            .authority.execution_authorized == false and
+            .authority.mutation_authorized == false and
+            .authority.durable_memory_accepted == false and
+            .authority.live_ingestion_performed == false
+          ' reports/proofpath/import-check.json >/dev/null
+
+          sha256sum \
+            reports/proofpath/proofpath-audit-events.jsonl \
+            reports/proofpath/import-check.json \
+            proofpath-import-tests.log \
+            > reports/proofpath/SHA256SUMS.txt
+
+      - name: Verify repository remains mutation-free
+        shell: bash
+        run: |
+          set -euo pipefail
+          test ! -e reports/proofpath/live-ingestion.json
+          git diff --exit-code -- sdk/ts/src/protocol-types.ts
+
+      - name: Upload exact contract evidence
+        uses: actions/upload-artifact@ea165f8d65b6e75b540449e92b4886f43607fa02 # v4
+        with:
+          name: liminaldb-proofpath-artifact-import-${{ github.run_id }}
+          path: reports/proofpath/
+          if-no-files-found: error
+          retention-days: 14
