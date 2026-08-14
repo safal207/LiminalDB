@@ -109,10 +109,7 @@ fn same_operation_and_same_artifact_is_idempotent_after_restart() {
     );
     retry.storage_admission_ref = sha256_ref(b"system-005-retry-storage-admission");
     let outcome = reopened.append(retry).expect("idempotent retry");
-    assert!(matches!(
-        outcome,
-        ProofPathAppendOutcome::AlreadyPresent(_)
-    ));
+    assert!(matches!(outcome, ProofPathAppendOutcome::AlreadyPresent(_)));
     assert_eq!(reopened.event_count(), 1);
     assert_eq!(
         outcome.record().body.transaction_time_ms,
@@ -140,10 +137,7 @@ fn same_operation_with_changed_artifact_fails_closed() {
             TRANSACTION_TIME_MS + 60_000,
         ))
         .expect_err("changed evidence under same operation must conflict");
-    assert!(matches!(
-        error,
-        ProofPathDurableError::IdempotencyConflict
-    ));
+    assert!(matches!(error, ProofPathDurableError::IdempotencyConflict));
     assert_eq!(ledger.event_count(), 1);
 }
 
@@ -203,10 +197,7 @@ fn invalid_bitemporal_order_is_rejected_before_write() {
     let error = ledger
         .append(input(source_event(), admission_report(), VALID_TIME_MS - 1))
         .expect_err("transaction time before valid time must fail");
-    assert!(matches!(
-        error,
-        ProofPathDurableError::InvalidTemporalOrder
-    ));
+    assert!(matches!(error, ProofPathDurableError::InvalidTemporalOrder));
     assert_eq!(ledger.event_count(), 0);
 }
 
