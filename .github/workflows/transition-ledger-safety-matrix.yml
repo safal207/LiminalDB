@@ -1,0 +1,111 @@
+name: Transition Ledger Safety Matrix
+
+on:
+  pull_request:
+    branches:
+      - main
+      - feat/trustworthy-transition-ledger-v0.1
+    paths:
+      - 'liminal-db/crates/liminal-store/**'
+      - '.github/workflows/transition-ledger-safety-matrix.yml'
+  push:
+    branches:
+      - main
+    paths:
+      - 'liminal-db/crates/liminal-store/**'
+      - '.github/workflows/transition-ledger-safety-matrix.yml'
+
+permissions:
+  contents: read
+
+concurrency:
+  group: transition-ledger-safety-${{ github.workflow }}-${{ github.ref }}
+  cancel-in-progress: true
+
+jobs:
+  ledger-safety:
+    name: ${{ matrix.os }}
+    strategy:
+      fail-fast: false
+      matrix:
+        os:
+          - ubuntu-latest
+          - windows-latest
+          - macos-latest
+    runs-on: ${{ matrix.os }}
+    defaults:
+      run:
+        working-directory: liminal-db
+    steps:
+      - name: Checkout
+        uses: actions/checkout@v4
+        with:
+          persist-credentials: false
+
+      - name: Set up Rust
+        uses: dtolnay/rust-toolchain@stable
+
+      - name: Cache Cargo
+        uses: Swatinem/rust-cache@v2
+        with:
+          workspaces: liminal-db
+
+      - name: Compile liminal-store
+        run: cargo check -p liminal-store
+
+      - name: Execute canonical ledger fixture
+        id: fixture
+        continue-on-error: true
+        shell: bash
+        run: |
+          set +e
+          cargo test -p liminal-store --test trustworthy_transition_fixture -- --nocapture > "../transition-ledger-fixture-${RUNNER_OS}.log" 2>&1
+          status=$?
+          echo "status=$status" >> "$GITHUB_OUTPUT"
+          tail -n 120 "../transition-ledger-fixture-${RUNNER_OS}.log"
+          exit "$status"
+
+      - name: Upload fixture diagnostics
+        if: ${{ always() }}
+        uses: actions/upload-artifact@v4
+        with:
+          name: transition-ledger-fixture-${{ runner.os }}-${{ github.run_id }}
+          path: transition-ledger-fixture-${{ runner.os }}.log
+          if-no-files-found: error
+          retention-days: 7
+
+      - name: Stop on fixture failure
+        if: ${{ steps.fixture.outputs.status != '0' }}
+        run: exit 1
+
+      - name: Reject before-write failure
+        if: ${{ steps.fixture.outputs.status == '0' }}
+        run: cargo test -p liminal-store --features durability-test-hooks --test trustworthy_transition_fault_injection before_write_failure_recovers_zero_events -- --nocapture
+
+      - name: Recover length-only tail
+        if: ${{ steps.fixture.outputs.status == '0' }}
+        run: cargo test -p liminal-store --features durability-test-hooks --test trustworthy_transition_fault_injection length_only_tail_is_truncated -- --nocapture
+
+      - name: Recover payload-without-CRC tail
+        if: ${{ steps.fixture.outputs.status == '0' }}
+        run: cargo test -p liminal-store --features durability-test-hooks --test trustworthy_transition_fault_injection payload_without_crc_tail_is_truncated -- --nocapture
+
+      - name: Replay complete unsynced frame when present
+        if: ${{ steps.fixture.outputs.status == '0' }}
+        run: cargo test -p liminal-store --features durability-test-hooks --test trustworthy_transition_fault_injection complete_unsynced_frame_is_replayed_when_present -- --nocapture
+
+      - name: Replay synced unacknowledged frame
+        if: ${{ steps.fixture.outputs.status == '0' }}
+        run: cargo test -p liminal-store --features durability-test-hooks --test trustworthy_transition_fault_injection synced_unacknowledged_frame_is_replayed -- --nocapture
+
+      - name: Verify failpoint thread isolation
+        if: ${{ steps.fixture.outputs.status == '0' }}
+        run: cargo test -p liminal-store --features durability-test-hooks --test trustworthy_transition_fault_injection append_failpoint_is_thread_local -- --nocapture
+
+      - name: Reject ambiguous partial payload
+        if: ${{ steps.fixture.outputs.status == '0' }}
+        run: cargo test -p liminal-store --features durability-test-hooks --test trustworthy_transition_fault_injection ambiguous_partial_payload_fails_closed_on_reopen -- --nocapture
+
+      - name: Run ledger unit and restart tests
+        if: ${{ steps.fixture.outputs.status == '0' }}
+        run: cargo test -p liminal-store trustworthy_transition

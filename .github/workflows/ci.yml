@@ -2,43 +2,127 @@ name: LiminalDB CI
 
 on:
   push:
-    branches: [ main ]
+    branches: [main]
     paths:
       - '**/*.rs'
-      - 'Cargo.toml'
-      - 'crates/**'
+      - '**/Cargo.toml'
+      - 'Cargo.lock'
+      - 'protocol/**'
+      - 'sdk/rust/**'
+      - 'conformance/**'
+      - 'liminal-db/**'
       - '.github/workflows/ci.yml'
   pull_request:
-    branches: [ main ]
+    branches: [main]
+  workflow_dispatch:
+
+permissions:
+  contents: read
 
 jobs:
-  build:
+  workspace:
     runs-on: ubuntu-latest
-    defaults:
-      run:
-        working-directory: liminal-db
     steps:
       - name: Checkout
         uses: actions/checkout@v6
+        with:
+          persist-credentials: false
 
-      - name: Install system deps
+      - name: Install system dependencies
         run: |
           sudo apt-get update
           sudo apt-get install -y pkg-config libssl-dev
 
       - name: Set up Rust
         uses: dtolnay/rust-toolchain@stable
+        with:
+          components: rustfmt, clippy
 
       - name: Cache cargo
         uses: Swatinem/rust-cache@v2
         with:
-          workspaces: liminal-db
+          workspaces: .
 
-      - name: Cargo check (workspace)
-        run: cargo check --workspace
+      - name: Formatting check (root workspace)
+        run: cargo fmt --all --check
 
-      - name: Cargo test (core + store)
+      - name: Cargo check (root workspace, all targets)
+        id: cargo_check
+        continue-on-error: true
+        shell: bash
         run: |
-          cargo test -q -p liminal-core --no-fail-fast
-          cargo test -q -p liminal-store --no-fail-fast
+          mkdir -p artifacts
+          set -o pipefail
+          cargo check --workspace --all-targets --locked 2>&1 | tee artifacts/cargo-check.txt
 
+      - name: Upload cargo-check failure evidence
+        if: steps.cargo_check.outcome == 'failure'
+        uses: actions/upload-artifact@v4
+        with:
+          name: root-workspace-cargo-check-failure
+          path: artifacts/cargo-check.txt
+          if-no-files-found: error
+          retention-days: 14
+
+      - name: Clippy advisory (root workspace, all targets)
+        id: clippy
+        if: steps.cargo_check.outcome == 'success'
+        continue-on-error: true
+        shell: bash
+        run: |
+          set -o pipefail
+          cargo clippy --workspace --all-targets --locked 2>&1 | tee artifacts/clippy.txt
+
+      - name: Upload Clippy advisory evidence
+        if: steps.clippy.outcome == 'failure'
+        uses: actions/upload-artifact@v4
+        with:
+          name: root-workspace-clippy-advisory
+          path: artifacts/clippy.txt
+          if-no-files-found: error
+          retention-days: 14
+
+      - name: Cargo test (root workspace)
+        id: tests
+        if: steps.cargo_check.outcome == 'success'
+        continue-on-error: true
+        shell: bash
+        run: |
+          set -o pipefail
+          cargo test --workspace --locked --no-fail-fast 2>&1 | tee artifacts/tests.txt
+
+      - name: Upload test failure evidence
+        if: steps.tests.outcome == 'failure'
+        uses: actions/upload-artifact@v4
+        with:
+          name: root-workspace-test-failure
+          path: artifacts/tests.txt
+          if-no-files-found: error
+          retention-days: 14
+
+      - name: Trustworthy-transition ledger restart demo
+        id: restart_demo
+        if: steps.cargo_check.outcome == 'success'
+        continue-on-error: true
+        shell: bash
+        run: |
+          set -o pipefail
+          cargo run -q --locked -p liminal-store --example trustworthy_transition_ledger 2>&1 | tee artifacts/restart-demo.txt
+
+      - name: Upload restart-demo failure evidence
+        if: steps.restart_demo.outcome == 'failure'
+        uses: actions/upload-artifact@v4
+        with:
+          name: trustworthy-transition-restart-demo-failure
+          path: artifacts/restart-demo.txt
+          if-no-files-found: error
+          retention-days: 14
+
+      - name: Report inherited Clippy safety debt
+        if: steps.clippy.outcome == 'failure'
+        run: >-
+          echo "::warning title=Inherited FFI safety debt::Clippy identified raw-pointer contract errors in liminal-bridge-abi. Exact evidence is uploaded; see issue #105."
+
+      - name: Fail closed on blocking validation errors
+        if: steps.cargo_check.outcome == 'failure' || steps.tests.outcome == 'failure' || steps.restart_demo.outcome == 'failure'
+        run: exit 1
