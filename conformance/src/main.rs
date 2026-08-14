@@ -2,8 +2,8 @@ use std::fs;
 use std::path::PathBuf;
 
 use anyhow::Context;
-use clap::Parser;
 use chrono::Utc;
+use clap::Parser;
 
 #[derive(Parser, Debug)]
 #[command(author, version, about = "LiminalDB protocol conformance suite")]
@@ -104,7 +104,10 @@ fn write_markdown(dir: &PathBuf, scenarios: &[Scenario]) -> anyhow::Result<()> {
             ScenarioStatus::Skipped => "⚪ Skipped",
             ScenarioStatus::Failed => "❌ Failed",
         };
-        md.push_str(&format!("| {} | {} | {} |\n", scenario.name, status, scenario.description));
+        md.push_str(&format!(
+            "| {} | {} | {} |\n",
+            scenario.name, status, scenario.description
+        ));
     }
     fs::write(dir.join("report.md"), md).context("failed to write markdown report")?;
     Ok(())

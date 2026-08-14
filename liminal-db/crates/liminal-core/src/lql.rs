@@ -267,12 +267,14 @@ where
                 return Err(LqlError::new("REFLEX TUNE requires a config"));
             }
             let joined = raw.join(" ");
-            let cfg: ReflexCfg = serde_json::from_str(&joined).map_err(|err| {
-                LqlError::new(format!("invalid REFLEX config: {err}"))
-            })?;
+            let cfg: ReflexCfg = serde_json::from_str(&joined)
+                .map_err(|err| LqlError::new(format!("invalid REFLEX config: {err}")))?;
             Ok(LqlAst::ReflexTune { cfg })
         }
-        other => Err(LqlError::new(format!("unknown REFLEX subcommand: {}", other))),
+        other => Err(LqlError::new(format!(
+            "unknown REFLEX subcommand: {}",
+            other
+        ))),
     }
 }
 

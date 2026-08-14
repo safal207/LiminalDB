@@ -1,24 +1,90 @@
 # LiminalDB
 
-Federated event-sourced memory layer for local-first and federated services.
+[![LiminalDB CI](https://github.com/safal207/LiminalDB/actions/workflows/ci.yml/badge.svg)](https://github.com/safal207/LiminalDB/actions/workflows/ci.yml)
+[![Security Baseline](https://github.com/safal207/LiminalDB/actions/workflows/security.yml/badge.svg)](https://github.com/safal207/LiminalDB/actions/workflows/security.yml)
+![Core](https://img.shields.io/badge/core-Rust-blue)
+![License](https://img.shields.io/badge/license-Apache--2.0-orange)
+![Status](https://img.shields.io/badge/status-pre--1.0-active-brightgreen)
 
-## NGI Fediversity reviewer path
+**A local-first evidence and continuity database for trustworthy autonomous systems.**
 
-LiminalDB was submitted to NGI Fediversity as an open-source federated event-sourced memory layer for local-first and federated cloud services.
+LiminalDB records five questions that ordinary logs and conversation memory usually collapse together:
 
-Start here:
+1. **What was authorized?**
+2. **What was actually observed?**
+3. **Was the reported response faithful to the observation?**
+4. **Was the causal interpretation evaluated?**
+5. **May an interrupted side effect safely continue, retry, stop, or require revalidation?**
 
-1. Read [`docs/FEDIVERSITY_REVIEWER_PATH.md`](docs/FEDIVERSITY_REVIEWER_PATH.md).
-2. Run `cargo build --release -p liminal-cli`.
-3. Run `cargo test --workspace`.
-4. Run the Windows demo: `powershell -ExecutionPolicy Bypass -File .\scripts\demo-stack.ps1`.
-5. Compare claims against [`READY_FOR_REVIEW.md`](READY_FOR_REVIEW.md), [`docs/GRANT_EVIDENCE.md`](docs/GRANT_EVIDENCE.md), and [`docs/BUDGET_AND_MILESTONES_FEDIVERSITY.md`](docs/BUDGET_AND_MILESTONES_FEDIVERSITY.md).
+It combines an append-only trustworthy-transition ledger, WAL-backed durable storage, replayable projections, signed checkpoints, anti-rollback checks, and an adaptive reactive runtime written in Rust.
 
-Reviewer quick commands:
+```text
+authorization
+→ execution observation
+→ response-integrity verdict
+→ causal-audit state
+→ durable continuity decision
+```
+
+> LiminalDB is pre-1.0 research and infrastructure. It does not claim production database certification, production distributed consensus, universal performance superiority, or a completed independent security audit.
+
+## Why LiminalDB exists
+
+AI agents and automated services can fail in a dangerous gap between **intent**, **execution**, and **reported outcome**. A process can time out after committing a side effect, restart with partial state, or report success without sufficient evidence.
+
+LiminalDB keeps these dimensions independent and replayable instead of reducing them to one ambiguous status field.
+
+## Core capabilities
+
+### Evidence Ledger
+
+- immutable authorization, observation, response-integrity, causal-audit, and continuity records;
+- canonical payload digests and record references;
+- deterministic projection rebuild after restart;
+- append-only event hash chaining;
+- explicit authority and side-effect boundaries.
+
+### Durable Storage
+
+- WAL and snapshots;
+- file synchronization before acknowledgement;
+- signed checkpoint ancestry;
+- trusted-key lifecycle and revocation rules;
+- external anti-rollback anchor interface;
+- crash-consistency evidence on Ubuntu, Windows, and macOS.
+
+### Adaptive Runtime
+
+- **Cells** — autonomous reactive units with energy, lifecycle, and pattern affinity;
+- **Impulses** — query, write, and affect signals;
+- **TRS** — PID-style adaptive control;
+- **Reflexes** — feedback rules responding to runtime stress;
+- **Seed Garden** — goal lifecycle: plant → grow → harvest;
+- **Mirror Timeline** — replayable event and decision history.
+
+### Interfaces
+
+- Rust workspace and SDK;
+- CLI runtime;
+- WebSocket protocol and TypeScript client;
+- WASM/ABI and network adapters;
+- protocol conformance suite.
+
+## Quick validation
+
+Run from the repository root:
 
 ```bash
+git clone https://github.com/safal207/LiminalDB.git
+cd LiminalDB
 cargo build --release -p liminal-cli
-cargo test --workspace
+cargo test --workspace --locked
+```
+
+Start the local runtime:
+
+```bash
+./target/release/liminal-cli --store ./data --ws-port 8787
 ```
 
 Windows demo:
@@ -27,142 +93,30 @@ Windows demo:
 powershell -ExecutionPolicy Bypass -File .\scripts\demo-stack.ps1
 ```
 
-Expected demo success markers:
+Expected success markers:
 
 ```text
 ws.local_listening
 ws_server.listening addr=127.0.0.1:8787
 ```
 
-Fediversity grant docs:
-
-- [`docs/FEDIVERSITY_REVIEWER_PATH.md`](docs/FEDIVERSITY_REVIEWER_PATH.md)
-- [`docs/FEDERATED_EVENT_SOURCING_ALIGNMENT.md`](docs/FEDERATED_EVENT_SOURCING_ALIGNMENT.md)
-- [`docs/ACTIVITYPUB_MATRIX_INTEGRATION_PLAN.md`](docs/ACTIVITYPUB_MATRIX_INTEGRATION_PLAN.md)
-- [`docs/BUDGET_AND_MILESTONES_FEDIVERSITY.md`](docs/BUDGET_AND_MILESTONES_FEDIVERSITY.md)
-- [`docs/GRANT_MILESTONE_TRACKER_FEDIVERSITY.md`](docs/GRANT_MILESTONE_TRACKER_FEDIVERSITY.md)
-
-Grant metadata:
+Interactive commands:
 
 ```text
-Application: 2026-08-00c
-Fund: NGI Fediversity
-Requested amount: EUR 50,000
-Correct repository: https://github.com/safal207/LiminalDB
+:seed plant BoostToken cpu/load {"scale":0.2} 60000
+:seed garden
+:status
+:mirror top 5
+:snapshot
 ```
 
----
-
-![Status](https://img.shields.io/badge/status-active-brightgreen)
-![Core](https://img.shields.io/badge/core-rust-blue)
-![License](https://img.shields.io/badge/license-Apache--2.0-orange)
-
-**Project status:** Active core/runtime development with CI coverage and production-focused architecture.
-
-**Quick validation:**
-```bash
-cargo build --release -p liminal-cli
-cargo test --workspace
-```
-
-**Single-command demo entrypoint (Windows):**
-```powershell
-powershell -ExecutionPolicy Bypass -File .\scripts\demo-stack.ps1
-```
-
-## Review links
-
-- Start here: [`docs/START_HERE.md`](docs/START_HERE.md)
-- 5-minute demo: [`docs/demo/FIVE_MINUTE_STACK_DEMO.md`](docs/demo/FIVE_MINUTE_STACK_DEMO.md)
-- Seed Garden demo: [`docs/demo/SEED_GARDEN_DEMO.md`](docs/demo/SEED_GARDEN_DEMO.md)
-- WebSocket examples: [`docs/api/WEBSOCKET_EXAMPLES.md`](docs/api/WEBSOCKET_EXAMPLES.md)
-- TypeScript SDK smoke: [`sdk/ts/README.md`](sdk/ts/README.md)
-- Grant evidence: [`docs/GRANT_EVIDENCE.md`](docs/GRANT_EVIDENCE.md)
-- Architecture: [`docs/`](docs/)
-- Benchmark baseline: [`docs/BENCHMARKS.md`](docs/BENCHMARKS.md)
-- Benchmark evidence: [`docs/evidence/BENCHMARK_EVIDENCE_SNAPSHOT.md`](docs/evidence/BENCHMARK_EVIDENCE_SNAPSHOT.md)
-- Release + compatibility: [`docs/RELEASE_COMPATIBILITY.md`](docs/RELEASE_COMPATIBILITY.md)
-- Validation: `cargo test --workspace`
-- Security: [`SECURITY.md`](SECURITY.md)
-- Roadmap: [`docs/ROADMAP.md`](docs/ROADMAP.md)
-- Grant materials: [`grants/`](grants/)
-- License: [`LICENSE`](LICENSE)
-
-A biologically-inspired, self-adaptive reactive database system written in Rust.
-
-## What is LiminalDB?
-
-LiminalDB models data operations as a living ecosystem instead of traditional CRUD:
-
-- **Cells** (NodeCell) — autonomous reactive agents with energy, metabolism, and pattern affinity
-- **Impulses** — signals flowing through the system (Query / Write / Affect)
-- **TRS** — PID control loop that automatically adapts system behaviour to changing load
-- **Reflexes** — feedback rules that respond to stress signals
-- **Seed Garden** — goal-oriented task lifecycle (plant → grow → harvest)
-- **Mirror Timeline** — append-only epoch log for replay and audit
-
-## Architecture
-
-```
-┌─────────────────────────────────────────┐
-│           liminal-core (~9 K LOC)        │
-│                                          │
-│  ├─ Cell Management   (lifecycle)        │
-│  ├─ Pattern Routing   (affinity index)   │
-│  ├─ Adaptive Control  (TRS / PID)        │
-│  ├─ Reflex System     (feedback loops)   │
-│  ├─ Seed Garden       (task lifecycle)   │
-│  ├─ Mirror Timeline   (event sourcing)   │
-│  └─ Storage Layer     (journal + WAL)    │
-└─────────────────────────────────────────┘
-         ▲              ▲              ▲
-   ┌─────┴────┐  ┌──────┴─────┐  ┌───┴──────┐
-   │   CLI    │  │  WebSocket  │  │ WASM/ABI │
-   └──────────┘  └─────────────┘  └──────────┘
-```
-
-**Design principles:** Hexagonal (Ports & Adapters), Event Sourcing, DDD bounded contexts.  
-Core has zero I/O dependencies — adapters can be swapped or tested in isolation.
-
-## Quick Start
-
-```bash
-git clone https://github.com/safal207/LiminalDB.git
-cd LiminalDB
-
-cargo build --release -p liminal-cli
-./target/release/liminal-cli --store ./data --ws-port 8787
-```
-
-Expected output:
-
-- `ws.local_listening` in CLI logs
-- `ws_server.listening addr=127.0.0.1:8787` in bridge logs
-- CLI accepts commands like `:status` and `:mirror top 10`
-
-If `liminal-cli` exits immediately on Windows, keep stdin open (for example
-with `cmd /c "ping -t 127.0.0.1 | ..."`). See
-[`docs/STACK_DEMO.md`](docs/STACK_DEMO.md) for a reproducible stack flow and
-troubleshooting hints.
-
-### Interactive session
-
-```bash
-:seed plant BoostToken cpu/load {"scale":0.2} 60000   # plant a goal
-:seed garden                                            # inspect growth
-:status                                                 # live metrics
-:mirror top 5                                           # recent decisions
-:snapshot                                               # persist state
-```
-
-### Rust SDK
+## Rust example
 
 ```rust
 use liminal_core::*;
 
 let mut field = ClusterField::new();
 field.spawn_cell_with_pattern("cpu/load");
-
 field.ingest_impulse(Impulse::query("cpu/load", 0.8));
 field.tick_all();
 
@@ -171,23 +125,17 @@ for event in field.drain_events() {
 }
 ```
 
-### TypeScript SDK (WebSocket)
-
-> The TypeScript SDK wraps the WebSocket protocol defined in
-> [liminal-db/docs/PROTOCOL.md](liminal-db/docs/PROTOCOL.md).
-> Source: `sdk/ts/src/client.ts`
+## TypeScript WebSocket example
 
 ```typescript
 import { LiminalClient } from './sdk/ts/src/index';
 
 const client = new LiminalClient('ws://localhost:8787');
 
-// Subscribe to harmony events
-client.on('harmony', (msg) => {
-  console.log('live_load:', msg.meta?.live_load);
+client.on('harmony', (message) => {
+  console.log('live_load:', message.meta?.live_load);
 });
 
-// Send an impulse via the protocol
 client.send(JSON.stringify({
   cmd: 'impulse',
   pattern: 'cpu/load',
@@ -195,43 +143,118 @@ client.send(JSON.stringify({
 }));
 ```
 
-## Project Status
+## Architecture
 
-**Version:** 0.5.x (pre-1.0, active development)
+```text
+LiminalDB
+├── Evidence Ledger
+│   ├── Authorization
+│   ├── Observation
+│   ├── Response Integrity
+│   ├── Causal Audit
+│   └── Continuity
+├── Durable Storage
+│   ├── WAL
+│   ├── Snapshots
+│   ├── Signed Checkpoints
+│   └── Anti-Rollback
+├── Adaptive Runtime
+│   ├── Cells and Routing
+│   ├── TRS and Reflexes
+│   ├── Mirror Timeline
+│   └── Seed Garden
+└── Adapters
+    ├── CLI and WebSocket
+    ├── SDKs and ABI
+    └── Future Federation
+```
+
+The core follows ports-and-adapters, event-sourcing, and bounded-context principles. Current architectural debt and the safe `ClusterField` decomposition sequence are documented in [`docs/CLUSTER_FIELD_REFACTOR_PLAN.md`](docs/CLUSTER_FIELD_REFACTOR_PLAN.md).
+
+## Evidence status
+
+**Measured evidence is kept separate from design targets and production guarantees.**
+
+The published single-node WebSocket baseline currently reports:
+
+- LQL round-trip p50: `0.87 ms`;
+- LQL round-trip p99: `1.60 ms`;
+- estimated ingest throughput: approximately `15.3K events/sec`.
+
+These measurements come from one documented developer machine and are not universal performance claims. See [`docs/BENCHMARKS.md`](docs/BENCHMARKS.md) for commands, hardware, results, and caveats.
+
+Pending evidence includes long-duration soak tests, replay timing packs, multi-node performance, and continuous performance regression checks.
+
+## Current status
 
 | Area | Status |
-|------|--------|
-| Core biological engine (cells, impulses, metabolism) | ✅ Done |
-| Event sourcing (journal, snapshots, WAL) | ✅ Done |
-| PID adaptive control (TRS) | ✅ Done |
-| Reflex & variant decision systems | ✅ Done |
-| CLI, WebSocket, WASM, FFI bridges | ✅ Done |
-| Rust SDK + TypeScript SDK | ✅ Done |
-| Protocol specification | ✅ Done |
-| Distributed cluster / Raft consensus | 🚧 In progress |
+|---|---|
+| Adaptive runtime core | ✅ Implemented |
+| Event sourcing, WAL, snapshots, replay | ✅ Implemented |
+| Trustworthy-transition ledger | ✅ Implemented |
+| Signed checkpoints and anti-rollback boundary | ✅ Implemented |
+| Cross-platform crash-consistency matrix | ✅ Implemented |
+| CLI, WebSocket, Rust and TypeScript surfaces | ✅ Implemented |
+| First measured single-node baseline | ✅ Published |
+| Federated replication | 🚧 Design / implementation work |
 | OpenTelemetry tracing | 🚧 In progress |
-| Performance benchmarks (real hardware) | 🚧 In progress |
-| Security audit | 🚧 In progress |
+| Long-duration and multi-node benchmarks | 🚧 Pending |
+| Independent production security audit | 🚧 Pending |
 
-## Performance Targets
+## Product and roadmap
 
-These are **design targets**, not yet validated measurements.
-Benchmarking against a live instance is tracked in
-[docs/USE_CASE_IOT_MONITORING.md](docs/USE_CASE_IOT_MONITORING.md).
+- Current product direction: [`docs/PRODUCT_DIRECTION_2026.md`](docs/PRODUCT_DIRECTION_2026.md)
+- Contributor onboarding: [`docs/START_HERE.md`](docs/START_HERE.md)
+- Architecture analysis: [`docs/ARCHITECTURE_ANALYSIS.md`](docs/ARCHITECTURE_ANALYSIS.md)
+- Historical roadmap: [`docs/ROADMAP.md`](docs/ROADMAP.md)
+- Benchmark evidence: [`docs/BENCHMARKS.md`](docs/BENCHMARKS.md)
+- Release compatibility: [`docs/RELEASE_COMPATIBILITY.md`](docs/RELEASE_COMPATIBILITY.md)
+- Security policy: [`SECURITY.md`](SECURITY.md)
 
-| Metric | Target |
-|--------|--------|
-| Cell routing latency p99 | < 5 ms for 10 K cells |
-| Impulse throughput | > 10 K / sec |
-| Memory | < 100 MB for 10 K cells |
-| Snapshot write (100 MB state) | < 500 ms |
-| Recovery after node failure | < 30 s |
+## NGI Fediversity reviewer path
 
-First measured baseline:
-[`docs/BENCHMARKS.md`](docs/BENCHMARKS.md) now includes a published live
-single-node benchmark sample with reproducible commands and explicit caveats.
+LiminalDB was submitted to NGI Fediversity as an open-source local-first and federated event-sourced memory layer.
 
-## Use Cases
+Reviewer path:
 
-- **Adaptive monitoring** — alert thresholds that self-tune to workload
-- **IoT data ingestion** — burst-tolerant pipeline without manual provisioning
+1. Read [`docs/FEDIVERSITY_REVIEWER_PATH.md`](docs/FEDIVERSITY_REVIEWER_PATH.md).
+2. Run `cargo build --release -p liminal-cli`.
+3. Run `cargo test --workspace --locked`.
+4. Run the Windows demo when applicable.
+5. Compare claims with [`READY_FOR_REVIEW.md`](READY_FOR_REVIEW.md), [`docs/GRANT_EVIDENCE.md`](docs/GRANT_EVIDENCE.md), and [`docs/BUDGET_AND_MILESTONES_FEDIVERSITY.md`](docs/BUDGET_AND_MILESTONES_FEDIVERSITY.md).
+
+```text
+Application: 2026-08-00c
+Fund: NGI Fediversity
+Requested amount: EUR 50,000
+Repository: https://github.com/safal207/LiminalDB
+```
+
+Federation planning:
+
+- [`docs/FEDERATED_EVENT_SOURCING_ALIGNMENT.md`](docs/FEDERATED_EVENT_SOURCING_ALIGNMENT.md)
+- [`docs/ACTIVITYPUB_MATRIX_INTEGRATION_PLAN.md`](docs/ACTIVITYPUB_MATRIX_INTEGRATION_PLAN.md)
+- [`docs/GRANT_MILESTONE_TRACKER_FEDIVERSITY.md`](docs/GRANT_MILESTONE_TRACKER_FEDIVERSITY.md)
+
+## Claim boundary
+
+Safe statements:
+
+- the repository contains an executable Rust implementation;
+- durable transition state can be persisted and deterministically replayed;
+- signed-checkpoint, safety, and process-crash cases have reproducible CI evidence;
+- a measured single-node baseline is published with explicit caveats.
+
+Not currently claimed:
+
+- sudden-power-loss durability on arbitrary hardware;
+- hostile or network-filesystem correctness;
+- production anti-rollback guarantees;
+- production-grade distributed consensus;
+- universal causal truth;
+- stable pre-1.0 APIs;
+- enterprise certification or compliance.
+
+## License
+
+Apache License 2.0. See [`LICENSE`](LICENSE).

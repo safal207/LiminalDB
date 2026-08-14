@@ -9,9 +9,7 @@ use tokio::time::sleep;
 use liminal_core::types::{Impulse, ImpulseKind};
 
 pub async fn start_host_sensors(tx: mpsc::Sender<Impulse>) {
-    let mut system = System::new_with_specifics(
-        RefreshKind::everything()
-    );
+    let mut system = System::new_with_specifics(RefreshKind::everything());
     let mut tick: f32 = 0.0;
     let mut rng = ChaCha8Rng::seed_from_u64(42);
 

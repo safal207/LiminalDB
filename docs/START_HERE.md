@@ -1,84 +1,123 @@
-# Start Here — Contributing to LiminalDB
+# Start Here — LiminalDB
 
-LiminalDB is a Rust-based, biologically inspired reactive database system. It models data and runtime behavior as a living ecosystem of cells, impulses, adaptive control loops, reflexes, goals, and replayable timelines.
+LiminalDB is a pre-1.0 Rust foundation for trustworthy autonomous systems: a local-first evidence and continuity database with durable replay, signed checkpoints, and an adaptive reactive runtime.
 
-The short version:
+The shortest useful description is:
 
-> LiminalDB is an adaptive reactive database where data operations behave less like static CRUD and more like a living, observable, self-adjusting system.
+> LiminalDB records what was authorized, what was actually observed, whether the response was faithful, and whether an interrupted side effect may safely continue.
 
 ## 10-minute onboarding path
 
-1. Read the root `README.md` for the project story, quickstart, architecture, and status.
-2. Read `docs/ARCHITECTURE_ANALYSIS.md` for system structure and design decisions.
-3. Read `docs/BENCHMARKS.md` for measured benchmark evidence and caveats.
-4. Read `docs/RELEASE_COMPATIBILITY.md` to understand version and compatibility expectations.
-5. Build and test the workspace locally:
+1. Read the root [`README.md`](../README.md) for product scope, claim boundaries, quickstart, and current evidence.
+2. Read [`PRODUCT_DIRECTION_2026.md`](PRODUCT_DIRECTION_2026.md) for the active product and architecture direction.
+3. Read [`BENCHMARKS.md`](BENCHMARKS.md) for measured performance evidence and caveats.
+4. Read [`RELEASE_COMPATIBILITY.md`](RELEASE_COMPATIBILITY.md) for pre-1.0 compatibility expectations.
+5. Build and test from the repository root:
 
 ```bash
 cargo build --release -p liminal-cli
-cargo test --workspace
+cargo test --workspace --locked
 ```
 
-6. Try the local demo stack:
+6. Run the local demo stack:
 
 ```powershell
 powershell -ExecutionPolicy Bypass -File .\scripts\demo-stack.ps1
 ```
 
-7. Pick an issue labeled `good first issue` or `help wanted`.
+7. Pick a focused issue labelled `good first issue` or `help wanted`.
 
-## What LiminalDB is
+## Product model
 
-LiminalDB is a pre-1.0 Rust database/runtime experiment focused on adaptive state, reactive control, and replayable system behavior.
+LiminalDB has four major layers:
 
-Its core idea is that a database can do more than store records. It can observe signals, route impulses, adjust behavior, record decisions, and expose the history of adaptation.
+```text
+Evidence Ledger
+→ Durable Storage
+→ Adaptive Runtime
+→ Interfaces and Federation Adapters
+```
 
-## Core concepts
+### Evidence Ledger
 
-- **Cells / NodeCell** — autonomous reactive units with energy, metabolism, lifecycle, and pattern affinity.
-- **Impulses** — signals flowing through the system, such as `Query`, `Write`, or `Affect`.
-- **TRS** — an adaptive PID-style control loop that helps the system respond to load and stress.
-- **Reflexes** — feedback rules that react to stress signals and runtime conditions.
-- **Seed Garden** — goal-oriented task lifecycle: plant -> grow -> harvest.
-- **Mirror Timeline** — append-only event/timeline layer for replay, audit, and inspection.
-- **Pattern routing** — routes impulses based on affinity and runtime state.
-- **Adapters** — CLI, WebSocket, WASM/ABI, and SDK layers around the core.
+The trustworthy-transition ledger keeps these dimensions independent:
+
+- authorization;
+- execution observation;
+- response integrity;
+- causal validity;
+- continuity posture.
+
+This separation prevents a successful-looking response from becoming proof that an action was authorized, executed, causally valid, or safe to retry.
+
+### Durable Storage
+
+The storage layer includes:
+
+- append-only event history;
+- WAL-backed persistence;
+- deterministic replay;
+- snapshots;
+- signed checkpoint ancestry;
+- anti-rollback validation;
+- process-crash recovery evidence.
+
+### Adaptive Runtime
+
+The biologically inspired runtime includes:
+
+- **Cells / NodeCell** — autonomous reactive units with energy, lifecycle, and pattern affinity;
+- **Impulses** — query, write, and affect signals;
+- **TRS** — adaptive PID-style control;
+- **Reflexes** — feedback rules reacting to runtime stress;
+- **Seed Garden** — goal lifecycle: plant → grow → harvest;
+- **Mirror Timeline** — replayable runtime and decision history;
+- **Pattern routing** — routes impulses using affinity and runtime state.
+
+The biological terminology is an implementation and modelling layer. It is not the product claim by itself.
 
 ## Local validation
 
-Build the CLI:
+Run commands from the repository root.
+
+Formatting:
+
+```bash
+cargo fmt --all --check
+```
+
+Compile the complete root workspace:
+
+```bash
+cargo check --workspace --all-targets --locked
+```
+
+Run clippy:
+
+```bash
+cargo clippy --workspace --all-targets --locked
+```
+
+Run all workspace tests:
+
+```bash
+cargo test --workspace --locked --no-fail-fast
+```
+
+Run the trustworthy-transition restart example:
+
+```bash
+cargo run --locked -p liminal-store --example trustworthy_transition_ledger
+```
+
+Start the CLI/WebSocket runtime:
 
 ```bash
 cargo build --release -p liminal-cli
-```
-
-Run the full workspace tests:
-
-```bash
-cargo test --workspace
-```
-
-Run with debug logs if needed:
-
-```bash
-RUST_LOG=debug cargo test --workspace
-```
-
-Start a local CLI/WebSocket instance:
-
-```bash
 ./target/release/liminal-cli --store ./data --ws-port 8787
 ```
 
-On Windows, use the provided demo stack script:
-
-```powershell
-powershell -ExecutionPolicy Bypass -File .\scripts\demo-stack.ps1
-```
-
 ## First interactive commands
-
-After starting `liminal-cli`, try:
 
 ```text
 :seed plant BoostToken cpu/load {"scale":0.2} 60000
@@ -88,108 +127,99 @@ After starting `liminal-cli`, try:
 :snapshot
 ```
 
-What these commands show:
-
-- `:seed plant ...` creates a goal in the Seed Garden.
-- `:seed garden` inspects active goal lifecycle state.
-- `:status` shows live system/runtime status.
-- `:mirror top 5` inspects recent Mirror Timeline events.
-- `:snapshot` persists state.
-
-## Safe contribution zones
-
-These are good places for new contributors:
-
-- Documentation improvements.
-- Clean-machine quickstart validation.
-- Demo walkthroughs.
-- WebSocket protocol examples.
-- TypeScript SDK examples.
-- Benchmark evidence summaries.
-- README visual polish.
-- Seed Garden documentation.
-- Mirror Timeline examples.
-- Colab / Python binding docs.
-- Platform-specific troubleshooting notes.
-
-## Changes that need deeper review
-
-Discuss these before implementation:
-
-- Core cell lifecycle changes.
-- Metabolism or energy model changes.
-- TRS/PID control behavior changes.
-- Reflex rule semantics.
-- Mirror Timeline/event sourcing format changes.
-- Journal/WAL/snapshot compatibility changes.
-- WebSocket protocol changes.
-- SDK API compatibility changes.
-- WASM/ABI/FFI surface changes.
-- Distributed cluster or Raft changes.
-- Benchmark claims or production performance claims.
-- Security, persistence, or compatibility guarantees.
+These commands demonstrate goal lifecycle, runtime status, replayable history, and local persistence. They are not production certification.
 
 ## Repository map
 
-- `liminal-core/` — core biological engine and domain logic.
-- `liminal-db/` — database/protocol-related components and docs.
-- `liminal-cli/` — CLI and local runtime entrypoint.
-- `sdk/ts/` — TypeScript SDK / WebSocket client surface.
-- `bindings/` — language bindings, including Python-related work.
-- `scripts/` — local demo and utility scripts.
-- `docs/` — architecture, roadmap, benchmark, and usage documentation.
-- `grants/` — grant-facing materials.
+- `Cargo.toml` — canonical root workspace.
+- `liminal-db/crates/liminal-core/` — adaptive runtime and domain logic.
+- `liminal-db/crates/liminal-store/` — WAL, snapshots, evidence ledger, checkpoints, and durability logic.
+- `liminal-db/crates/liminal-cli/` — CLI and local runtime entrypoint.
+- `liminal-db/crates/liminal-bridge-net/` — network and WebSocket bridge.
+- `liminal-db/crates/liminal-bridge-abi/` — ABI integration surface.
+- `protocol/` — protocol definitions.
+- `conformance/` — protocol conformance tests.
+- `sdk/rust/` — Rust SDK and benchmark examples.
+- `sdk/ts/` — TypeScript WebSocket client.
+- `scripts/` — local demonstrations and utilities.
+- `tools/` — evidence and CI harnesses.
+- `docs/` — product, architecture, evidence, and reviewer documentation.
+- `grants/` — grant-facing material.
 
-Exact layout may evolve while the project is pre-1.0, so check the current tree before making broad changes.
+The nested `liminal-db/Cargo.toml` covers the original runtime subset; repository-level CI must validate the canonical root workspace so protocol, SDK, and conformance members are not silently excluded.
+
+## Safe contribution zones
+
+Good first contributions:
+
+- clean-machine quickstart validation;
+- documentation and broken-link fixes;
+- WebSocket and SDK examples;
+- benchmark evidence formatting;
+- demo walkthroughs;
+- platform-specific troubleshooting;
+- characterization tests that preserve existing behavior;
+- issue and roadmap hygiene.
+
+## Changes requiring deeper review
+
+Discuss and isolate these before implementation:
+
+- trustworthy-transition schema or ordering changes;
+- WAL, snapshot, checkpoint, or anti-rollback changes;
+- authorization or continuity semantics;
+- `ClusterField` lifecycle and routing behavior;
+- TRS, reflex, dream, or Seed Garden semantics;
+- protocol and SDK compatibility;
+- federation validation rules;
+- performance and production claims;
+- security or durability guarantees.
+
+The safe decomposition sequence for `ClusterField` is documented in [`CLUSTER_FIELD_REFACTOR_PLAN.md`](CLUSTER_FIELD_REFACTOR_PLAN.md).
 
 ## Product boundary
 
-LiminalDB is currently best described as:
+LiminalDB currently claims:
 
-> a pre-1.0 Rust foundation for adaptive reactive storage and replayable runtime behavior.
+- an executable pre-1.0 Rust implementation;
+- replayable local evidence and projections;
+- signed-checkpoint and process-crash test coverage;
+- a measured single-node benchmark baseline with caveats;
+- adapter-oriented federation planning.
 
 It does **not** currently claim:
 
-- production database certification,
-- drop-in replacement for Postgres, Redis, Kafka, or other mature systems,
-- verified performance across all workloads and hardware,
-- production-grade distributed consensus guarantees,
-- production security audit completion,
-- stable pre-1.0 API or protocol compatibility,
-- mature enterprise compliance guarantees.
+- drop-in replacement for mature databases or message brokers;
+- exactly-once external side effects;
+- sudden-power-loss durability on arbitrary hardware;
+- production distributed consensus;
+- production anti-rollback guarantees;
+- universal causal truth;
+- a completed independent production security audit;
+- stable pre-1.0 APIs or enterprise compliance.
 
 ## Evidence principle
 
-LiminalDB documentation should keep these categories separate:
+Keep these categories separate:
 
 ```text
-design target != measured benchmark != production guarantee
+design target != executable example != exact-head CI evidence != production guarantee
 ```
 
 Good:
 
-> `docs/BENCHMARKS.md` contains a measured single-node baseline with reproducible commands and explicit caveats.
+> `docs/BENCHMARKS.md` contains a measured single-node baseline with reproducible commands and explicit limitations.
 
 Avoid:
 
-> LiminalDB is universally faster than mature production databases.
+> LiminalDB is universally faster or safer than mature production systems.
 
-## Recommended first issues
+## Contribution protocol
 
-Good starting points:
+A strong contribution should preserve:
 
-1. Verify the quickstart on a clean machine.
-2. Add a 5-minute stack demo walkthrough.
-3. Add a benchmark evidence snapshot for reviewers.
-4. Add WebSocket protocol examples.
-5. Add TypeScript SDK smoke example.
-6. Add Seed Garden demo walkthrough.
-7. Add README benchmark/status badges.
-
-## Contribution principle
-
-A strong LiminalDB contribution should preserve three things:
-
-1. **Clarity** — readers should understand the living-system metaphor without losing the concrete Rust/runtime model.
-2. **Reproducibility** — demos and benchmarks should be runnable locally.
-3. **Evidence discipline** — performance and production claims should stay tied to measured artifacts and caveats.
+1. **Clarity** — conventional engineering meaning remains visible beneath the metaphor.
+2. **Reproducibility** — material claims point to commands, tests, or artifacts.
+3. **Evidence discipline** — unavailable review lanes are reported as unavailable, not passed.
+4. **Narrow scope** — one PR should solve one reviewable problem.
+5. **Human authority** — CI and AI review may advise or block, but they do not obtain merge or deployment authority implicitly.

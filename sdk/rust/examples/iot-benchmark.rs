@@ -78,8 +78,7 @@ impl ModelledResult {
     }
 
     fn avg(&self) -> f64 {
-        self.modelled_latencies_ms.iter().sum::<f64>()
-            / self.modelled_latencies_ms.len() as f64
+        self.modelled_latencies_ms.iter().sum::<f64>() / self.modelled_latencies_ms.len() as f64
     }
 
     fn print_summary(&self) {
@@ -87,9 +86,18 @@ impl ModelledResult {
         println!("Scenario : {}", self.scenario);
         println!("{}", "─".repeat(72));
         println!("  Events     : {:>12}", self.total_events);
-        println!("  Wall time  : {:>12.1} ms  (loop only, no I/O)", self.wall_time_ms);
-        println!("  Throughput : {:>12.0} events/sec", self.throughput_per_sec());
-        println!("  Memory     : {:>12.1} MB  [modelled]", self.modelled_memory_mb);
+        println!(
+            "  Wall time  : {:>12.1} ms  (loop only, no I/O)",
+            self.wall_time_ms
+        );
+        println!(
+            "  Throughput : {:>12.0} events/sec",
+            self.throughput_per_sec()
+        );
+        println!(
+            "  Memory     : {:>12.1} MB  [modelled]",
+            self.modelled_memory_mb
+        );
         println!("  Latency (modelled):");
         println!("    p50      : {:>12.2} ms", self.p50());
         println!("    p99      : {:>12.2} ms", self.p99());
@@ -194,44 +202,56 @@ fn print_comparison(results: &[ModelledResult]) {
 
     // Latency
     println!("\n  Latency p99 (ms) — lower is better:");
-    println!("  {:<38} {:>12} {:>12} {:>12}",
-        "Scenario", "LiminalDB*", "Redis", "Kafka");
+    println!(
+        "  {:<38} {:>12} {:>12} {:>12}",
+        "Scenario", "LiminalDB*", "Redis", "Kafka"
+    );
     println!("  {}", "─".repeat(76));
     let liminal_p99 = [results[0].p99(), results[1].p99(), results[2].p99()];
-    let redis_p99   = [1.8_f64,   24.0,  156.0];
-    let kafka_p99   = [3.2_f64,   18.0,   45.0];
+    let redis_p99 = [1.8_f64, 24.0, 156.0];
+    let kafka_p99 = [3.2_f64, 18.0, 45.0];
     for (i, r) in results.iter().enumerate() {
         let short = r.scenario.split('—').next().unwrap_or("").trim();
-        println!("  {:<38} {:>11.1}ms {:>11.1}ms {:>11.1}ms",
-            short, liminal_p99[i], redis_p99[i], kafka_p99[i]);
+        println!(
+            "  {:<38} {:>11.1}ms {:>11.1}ms {:>11.1}ms",
+            short, liminal_p99[i], redis_p99[i], kafka_p99[i]
+        );
     }
 
     // Throughput
     println!("\n  Throughput (events/sec) — modelled sustainable:");
-    println!("  {:<38} {:>12} {:>12} {:>12} {:>10}",
-        "Scenario", "LiminalDB*", "Redis", "Kafka", "Drop rate");
+    println!(
+        "  {:<38} {:>12} {:>12} {:>12} {:>10}",
+        "Scenario", "LiminalDB*", "Redis", "Kafka", "Drop rate"
+    );
     println!("  {}", "─".repeat(86));
     let liminal_tp = [1_670_f64, 41_000.0, 50_000.0];
-    let redis_tp   = [1_670_f64, 41_000.0, 41_000.0];
-    let kafka_tp   = [1_670_f64, 41_000.0, 50_000.0];
-    let drops      = ["0 %", "0 %", "~8 % (Redis)"];
+    let redis_tp = [1_670_f64, 41_000.0, 41_000.0];
+    let kafka_tp = [1_670_f64, 41_000.0, 50_000.0];
+    let drops = ["0 %", "0 %", "~8 % (Redis)"];
     for (i, r) in results.iter().enumerate() {
         let short = r.scenario.split('—').next().unwrap_or("").trim();
-        println!("  {:<38} {:>11.0}/s {:>11.0}/s {:>11.0}/s {:>10}",
-            short, liminal_tp[i], redis_tp[i], kafka_tp[i], drops[i]);
+        println!(
+            "  {:<38} {:>11.0}/s {:>11.0}/s {:>11.0}/s {:>10}",
+            short, liminal_tp[i], redis_tp[i], kafka_tp[i], drops[i]
+        );
     }
 
     // Memory
     println!("\n  Peak memory (MB) — modelled RSS:");
-    println!("  {:<38} {:>12} {:>12} {:>12}",
-        "Scenario", "LiminalDB*", "Redis", "Kafka");
+    println!(
+        "  {:<38} {:>12} {:>12} {:>12}",
+        "Scenario", "LiminalDB*", "Redis", "Kafka"
+    );
     println!("  {}", "─".repeat(76));
     let redis_mem = [120.0_f64, 450.0, 850.0];
     let kafka_mem = [380.0_f64, 1_200.0, 2_100.0];
     for (i, r) in results.iter().enumerate() {
         let short = r.scenario.split('—').next().unwrap_or("").trim();
-        println!("  {:<38} {:>11.0} MB {:>11.0} MB {:>11.0} MB",
-            short, r.modelled_memory_mb, redis_mem[i], kafka_mem[i]);
+        println!(
+            "  {:<38} {:>11.0} MB {:>11.0} MB {:>11.0} MB",
+            short, r.modelled_memory_mb, redis_mem[i], kafka_mem[i]
+        );
     }
 
     println!("\n  * LiminalDB figures are MODELLED, not yet measured on live hardware.");
@@ -247,11 +267,7 @@ fn main() {
     println!("=============================================");
     println!("(Synthetic loop; no real LiminalDB instance involved)\n");
 
-    let results = vec![
-        model_steady_load(),
-        model_spike_load(),
-        model_burst_load(),
-    ];
+    let results = vec![model_steady_load(), model_spike_load(), model_burst_load()];
 
     for r in &results {
         r.print_summary();
