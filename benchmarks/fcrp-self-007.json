@@ -1,0 +1,113 @@
+{
+  "schema": "liminaldb.fcrp-case.v0.1",
+  "caseId": "FCRP-SELF-007",
+  "title": "Historical snapshot identity vs current contract identity",
+  "scope": {
+    "nodeId": "lotus-offline-import-compatibility",
+    "scale": "repository-snapshot/interface-contract/import-verifier",
+    "idea": "Historical provenance and current interface compatibility must remain independently verifiable facts."
+  },
+  "timeline": {
+    "past": {
+      "consumer_commit": "75ef9f7f403a34c60aa2ceba4cb3c97870d73e77",
+      "contract_blob_sha": "fd733971aaae089df770062bcf7f2c2d6d19ca1d",
+      "summary": "Lotus fixture events were produced against a historical LiminalDB snapshot and exact AuditEvent contract blob."
+    },
+    "present": {
+      "consumer_commit": "0cd6e77d52787bb36a97b75ba1a37cb027268eb3",
+      "contract_blob_sha": "fd733971aaae089df770062bcf7f2c2d6d19ca1d",
+      "summary": "LiminalDB main advanced, while the consumed protocol-types.ts bytes remained exactly unchanged."
+    },
+    "future": {
+      "summary": "Compatibility is evaluated from exact current contract bytes while historical adapter commit remains provenance rather than a permanent semantic key."
+    }
+  },
+  "evidence": [
+    {
+      "id": "E1",
+      "kind": "historical-contract",
+      "ref": "sdk/ts/src/protocol-types.ts@75ef9f7f403a34c60aa2ceba4cb3c97870d73e77",
+      "claim": "Historical AuditEvent contract blob is fd733971aaae089df770062bcf7f2c2d6d19ca1d."
+    },
+    {
+      "id": "E2",
+      "kind": "current-contract",
+      "ref": "sdk/ts/src/protocol-types.ts@0cd6e77d52787bb36a97b75ba1a37cb027268eb3",
+      "claim": "Current main exposes the same exact contract blob."
+    },
+    {
+      "id": "E3",
+      "kind": "historical-verifier",
+      "ref": "scripts/validate_lotus_memory.py@agent/lotus-memory-import-contract-v0-1",
+      "claim": "v0.1 required adapter.commit to equal one historical LiminalDB commit in addition to the contract blob."
+    },
+    {
+      "id": "E4",
+      "kind": "refactor",
+      "ref": "scripts/validate_lotus_memory.py@agent/lotus-memory-import-contract-v0-2",
+      "claim": "v0.2 computes the Git blob SHA of the current checked-out contract and compares event-declared contract identity against those exact bytes."
+    },
+    {
+      "id": "E5",
+      "kind": "regression",
+      "ref": "tests/test_validate_lotus_memory.py@agent/lotus-memory-import-contract-v0-2",
+      "claim": "Tests prove unchanged historical artifacts remain compatible when bytes match and fail when the declared contract blob diverges."
+    }
+  ],
+  "causalPath": [
+    {
+      "id": "N1",
+      "level": "compatibility-model",
+      "phase": "first-divergence",
+      "statement": "The v0.1 verifier used one historical repository commit as both provenance identity and semantic compatibility identity.",
+      "evidenceRefs": ["E3"]
+    },
+    {
+      "id": "N2",
+      "level": "repository-time",
+      "phase": "parent-evolves",
+      "statement": "LiminalDB main advanced while the consumed AuditEvent contract bytes remained unchanged.",
+      "evidenceRefs": ["E1", "E2"]
+    },
+    {
+      "id": "N3",
+      "level": "import-verdict",
+      "phase": "symptom",
+      "statement": "A semantically compatible historical artifact could be rejected solely because the repository snapshot identity changed.",
+      "evidenceRefs": ["E1", "E2", "E3"]
+    },
+    {
+      "id": "N4",
+      "level": "compatibility-boundary",
+      "phase": "refactor",
+      "statement": "Keep historical adapter.commit as provenance, but determine current compatibility by hashing the actual checked-out contract bytes and requiring exact declared blob equality.",
+      "evidenceRefs": ["E4", "E5"]
+    }
+  ],
+  "divergence": {
+    "symptomPoint": "N3",
+    "firstMeaningfulDivergence": "N1",
+    "causePoint": "N1",
+    "selectedRefactorPoint": "N4",
+    "evidenceRefs": ["E1", "E2", "E3", "E4", "E5"]
+  },
+  "navigation": {
+    "direction": "UP",
+    "reason": "The apparent stale-base problem resolves only after separating repository-snapshot time from interface-content identity."
+  },
+  "refactor": {
+    "point": "N4",
+    "change": "Replace permanent historical-commit equality with current checked-out contract-blob verification while preserving full historical adapter SHA as provenance.",
+    "expectedEffect": "Repository evolution no longer creates false incompatibility when the interface is byte-identical, while actual contract drift still fails closed."
+  },
+  "verification": {
+    "local": "PASS_PENDING_CI",
+    "upward": "PASS_PENDING_CI",
+    "stopConditions": {
+      "parentInvariantsPreserved": true,
+      "crossBoundaryEffectsAbsent": true,
+      "causalExplanationComplete": true
+    }
+  },
+  "expectedProtocolDecision": "PASS"
+}
