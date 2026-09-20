@@ -12,6 +12,7 @@ from typing import Any
 
 
 SYSTEM_CASE = "XTDB-LIMINALDB-001"
+XTDB_VERSION = "2.1.0"
 TABLE = "crashpoint_xtdb_evidence"
 
 
@@ -193,6 +194,7 @@ def prepare(args: argparse.Namespace) -> None:
 
     report = {
         "system_case": SYSTEM_CASE,
+        "xtdb_version": XTDB_VERSION,
         "status": "PREPARED",
         "rows_per_phase": len(trials),
         "total_expected_system_versions": len(trials) * 2,
@@ -348,6 +350,7 @@ def verify(args: argparse.Namespace) -> None:
 
     report = {
         "system_case": SYSTEM_CASE,
+        "xtdb_version": XTDB_VERSION,
         "status": "PASS",
         "actions": len(trials_by_action),
         "system_versions": len(history),
