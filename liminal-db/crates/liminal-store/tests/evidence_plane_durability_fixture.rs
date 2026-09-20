@@ -1,6 +1,6 @@
 use liminal_store::{
     sha256_ref, AuthorityState, CausalValidityState, ContinuityPosture, ExecutionState,
-    ResponseIntegrityState, TransitionDimensions, TransitionEvent, TransitionEventInput,
+    ResponseIntegrityState, TransitionDimensions, TransitionEventInput,
     TransitionLinks, TransitionRecordKind, TrustworthyTransitionLedger,
 };
 use serde_json::Value;
@@ -193,7 +193,6 @@ fn append_case(case: &Value) {
             .expect("authorization");
 
         let mut observation_refs: Vec<String> = Vec::new();
-        let mut previous_continuity_ref: Option<String> = None;
 
         for (index, revision) in revisions.iter().enumerate() {
             let liminal = &revision["liminal"];
@@ -227,6 +226,24 @@ fn append_case(case: &Value) {
             let observation =
                 ledger.append(observation).expect("observation");
             observation_refs.push(observation.body.record_ref.clone());
+
+            if index > 0 {
+                let invalidated = ledger
+                    .projection(&format!("durability:{case_id}"))
+                    .expect("projection after observation growth");
+                assert!(
+                    invalidated.continuity_snapshot_ref.is_none(),
+                    "{case_id}: new observation must invalidate prior continuity"
+                );
+                assert!(
+                    invalidated.response_integrity_ref.is_none(),
+                    "{case_id}: new observation must invalidate prior response integrity"
+                );
+                assert!(
+                    invalidated.causal_audit_ref.is_none(),
+                    "{case_id}: new observation must invalidate prior causal audit"
+                );
+            }
 
             let mut response = event(
                 case_id,
@@ -294,16 +311,12 @@ fn append_case(case: &Value) {
                     causal_audit_ref: Some(
                         causal_event.body.record_ref.clone(),
                     ),
-                    previous_continuity_ref:
-                        previous_continuity_ref.clone(),
+                    previous_continuity_ref: None,
                 },
             );
             continuity.dimensions = Some(expected.clone());
             continuity.side_effect_committed = side_effect_committed;
-            let continuity =
-                ledger.append(continuity).expect("continuity");
-            previous_continuity_ref =
-                Some(continuity.body.record_ref.clone());
+            ledger.append(continuity).expect("continuity");
 
             let current = ledger
                 .projection(&format!("durability:{case_id}"))
