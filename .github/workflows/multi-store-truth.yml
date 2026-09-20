@@ -87,38 +87,55 @@ jobs:
           set -euo pipefail
           mkdir -p artifacts
           base="https://raw.githubusercontent.com/mstevens843/crashpoint/$CRASHPOINT_COMMIT/$CRASHPOINT_BUNDLE"
-          curl --fail --silent --show-error --location --retry 3             "$base/manifest.json"             -o artifacts/crashpoint-manifest.json
-          curl --fail --silent --show-error --location --retry 3             "$base/prediction.json"             -o artifacts/crashpoint-prediction.json
+          curl --fail --silent --show-error --location --retry 3 \
+            "$base/manifest.json" \
+            -o artifacts/crashpoint-manifest.json
+          curl --fail --silent --show-error --location --retry 3 \
+            "$base/prediction.json" \
+            -o artifacts/crashpoint-prediction.json
           cp "$FIXTURE" artifacts/liminaldb-mapping-fixture.json
 
       - name: Reconfirm source-to-LiminalDB mapping
         shell: bash
         run: |
           set -euo pipefail
-          python3 scripts/validate_crashpoint_action_readback_fixture.py             --fixture "$FIXTURE"             --manifest artifacts/crashpoint-manifest.json             --prediction artifacts/crashpoint-prediction.json             | tee artifacts/source-mapping-verification.json
+          python3 scripts/validate_crashpoint_action_readback_fixture.py \
+            --fixture "$FIXTURE" \
+            --manifest artifacts/crashpoint-manifest.json \
+            --prediction artifacts/crashpoint-prediction.json \
+            | tee artifacts/source-mapping-verification.json
 
       - name: Re-run LiminalDB mapping and replay
         shell: bash
         run: |
           set -euo pipefail
-          cargo test --locked -p liminal-store             --test crashpoint_action_readback_fixture -- --nocapture             | tee artifacts/liminaldb-replay.txt
+          cargo test --locked -p liminal-store \
+            --test crashpoint_action_readback_fixture -- --nocapture \
+            | tee artifacts/liminaldb-replay.txt
 
       - name: Prepare three-phase XTDB projection
         shell: bash
         run: |
           set -euo pipefail
           python3 -m py_compile scripts/xtdb_liminaldb_001.py scripts/multi_store_truth_001.py
-          python3 scripts/multi_store_truth_001.py prepare             --fixture "$FIXTURE"             --manifest artifacts/crashpoint-manifest.json             --phase-a-sql artifacts/phase-a-claim.sql             --phase-b-sql artifacts/phase-b-unavailable.sql             --phase-c-sql artifacts/phase-c-readback.sql             | tee artifacts/multi-store-prepare.json
+          python3 scripts/multi_store_truth_001.py prepare \
+            --fixture "$FIXTURE" \
+            --manifest artifacts/crashpoint-manifest.json \
+            --phase-a-sql artifacts/phase-a-claim.sql \
+            --phase-b-sql artifacts/phase-b-unavailable.sql \
+            --phase-c-sql artifacts/phase-c-readback.sql \
+            | tee artifacts/multi-store-prepare.json
 
       - name: Phase A - claim only
         shell: bash
         run: |
           set -euo pipefail
           psql -X -v ON_ERROR_STOP=1 -f artifacts/phase-a-claim.sql
-          PHASE_A_SYSTEM_TIME="$(psql -X -At -v ON_ERROR_STOP=1             -c "SELECT system_time FROM xt.txs WHERE committed = true ORDER BY _id DESC LIMIT 1"             | tail -n1 | tr -d '"')"
+          PHASE_A_SYSTEM_TIME="$(psql -X -At -v ON_ERROR_STOP=1 \
+            -c "SELECT system_time FROM xt.txs WHERE committed = true ORDER BY _id DESC LIMIT 1" \
+            | tail -n1 | tr -d '"')"
           test -n "$PHASE_A_SYSTEM_TIME"
-          printf '%s
-' "$PHASE_A_SYSTEM_TIME" | tee artifacts/phase-a-system-time.txt
+          printf '%s\n' "$PHASE_A_SYSTEM_TIME" | tee artifacts/phase-a-system-time.txt
 
       - name: Phase B - readback unavailable
         shell: bash
@@ -126,12 +143,13 @@ jobs:
           set -euo pipefail
           sleep 1
           psql -X -v ON_ERROR_STOP=1 -f artifacts/phase-b-unavailable.sql
-          PHASE_B_SYSTEM_TIME="$(psql -X -At -v ON_ERROR_STOP=1             -c "SELECT system_time FROM xt.txs WHERE committed = true ORDER BY _id DESC LIMIT 1"             | tail -n1 | tr -d '"')"
+          PHASE_B_SYSTEM_TIME="$(psql -X -At -v ON_ERROR_STOP=1 \
+            -c "SELECT system_time FROM xt.txs WHERE committed = true ORDER BY _id DESC LIMIT 1" \
+            | tail -n1 | tr -d '"')"
           PHASE_A_SYSTEM_TIME="$(cat artifacts/phase-a-system-time.txt)"
           test -n "$PHASE_B_SYSTEM_TIME"
           test "$PHASE_A_SYSTEM_TIME" != "$PHASE_B_SYSTEM_TIME"
-          printf '%s
-' "$PHASE_B_SYSTEM_TIME" | tee artifacts/phase-b-system-time.txt
+          printf '%s\n' "$PHASE_B_SYSTEM_TIME" | tee artifacts/phase-b-system-time.txt
 
       - name: Phase C - authoritative readback restored where source permits
         shell: bash
@@ -139,12 +157,13 @@ jobs:
           set -euo pipefail
           sleep 1
           psql -X -v ON_ERROR_STOP=1 -f artifacts/phase-c-readback.sql
-          PHASE_C_SYSTEM_TIME="$(psql -X -At -v ON_ERROR_STOP=1             -c "SELECT system_time FROM xt.txs WHERE committed = true ORDER BY _id DESC LIMIT 1"             | tail -n1 | tr -d '"')"
+          PHASE_C_SYSTEM_TIME="$(psql -X -At -v ON_ERROR_STOP=1 \
+            -c "SELECT system_time FROM xt.txs WHERE committed = true ORDER BY _id DESC LIMIT 1" \
+            | tail -n1 | tr -d '"')"
           PHASE_B_SYSTEM_TIME="$(cat artifacts/phase-b-system-time.txt)"
           test -n "$PHASE_C_SYSTEM_TIME"
           test "$PHASE_B_SYSTEM_TIME" != "$PHASE_C_SYSTEM_TIME"
-          printf '%s
-' "$PHASE_C_SYSTEM_TIME" | tee artifacts/phase-c-system-time.txt
+          printf '%s\n' "$PHASE_C_SYSTEM_TIME" | tee artifacts/phase-c-system-time.txt
 
       - name: Capture current and historical views
         shell: bash
@@ -154,21 +173,38 @@ jobs:
           PHASE_B_SYSTEM_TIME="$(cat artifacts/phase-b-system-time.txt)"
           cols='_id, trial_id, case_id, knowledge_state, readback_stage, source_observation_availability, client_claim, external_outcome, observation_availability, externally_verified, effect_count, digests_match_admission, liminal_execution, liminal_response_integrity, liminal_causal_validity, liminal_continuity_posture, side_effect_committed, source_publication_commit, _valid_from, _valid_to, _system_from, _system_to'
 
-          psql -X --csv -v ON_ERROR_STOP=1             -c "SELECT $cols FROM multi_store_truth_evidence ORDER BY trial_id"             > artifacts/current.csv
+          psql -X --csv -v ON_ERROR_STOP=1 \
+            -c "SELECT $cols FROM multi_store_truth_evidence ORDER BY trial_id" \
+            > artifacts/current.csv
 
-          psql -X --csv -v ON_ERROR_STOP=1             -c "SELECT $cols FROM multi_store_truth_evidence FOR SYSTEM_TIME ALL FOR VALID_TIME ALL ORDER BY trial_id, _system_from"             > artifacts/history.csv
+          psql -X --csv -v ON_ERROR_STOP=1 \
+            -c "SELECT $cols FROM multi_store_truth_evidence FOR SYSTEM_TIME ALL FOR VALID_TIME ALL ORDER BY trial_id, _system_from" \
+            > artifacts/history.csv
 
-          psql -X --csv -v ON_ERROR_STOP=1             -c "SELECT $cols FROM multi_store_truth_evidence FOR SYSTEM_TIME AS OF TIMESTAMP '$PHASE_A_SYSTEM_TIME' FOR VALID_TIME ALL ORDER BY trial_id"             > artifacts/phase-a-asof.csv
+          psql -X --csv -v ON_ERROR_STOP=1 \
+            -c "SELECT $cols FROM multi_store_truth_evidence FOR SYSTEM_TIME AS OF TIMESTAMP '$PHASE_A_SYSTEM_TIME' FOR VALID_TIME ALL ORDER BY trial_id" \
+            > artifacts/phase-a-asof.csv
 
-          psql -X --csv -v ON_ERROR_STOP=1             -c "SELECT $cols FROM multi_store_truth_evidence FOR SYSTEM_TIME AS OF TIMESTAMP '$PHASE_B_SYSTEM_TIME' FOR VALID_TIME ALL ORDER BY trial_id"             > artifacts/phase-b-asof.csv
+          psql -X --csv -v ON_ERROR_STOP=1 \
+            -c "SELECT $cols FROM multi_store_truth_evidence FOR SYSTEM_TIME AS OF TIMESTAMP '$PHASE_B_SYSTEM_TIME' FOR VALID_TIME ALL ORDER BY trial_id" \
+            > artifacts/phase-b-asof.csv
 
-          psql -X --csv -v ON_ERROR_STOP=1             -c "SELECT _id, committed, error, system_time FROM xt.txs ORDER BY _id"             > artifacts/xtdb-transactions.csv
+          psql -X --csv -v ON_ERROR_STOP=1 \
+            -c "SELECT _id, committed, error, system_time FROM xt.txs ORDER BY _id" \
+            > artifacts/xtdb-transactions.csv
 
       - name: Verify cross-layer truth boundaries
         shell: bash
         run: |
           set -euo pipefail
-          python3 scripts/multi_store_truth_001.py verify             --fixture "$FIXTURE"             --manifest artifacts/crashpoint-manifest.json             --current-csv artifacts/current.csv             --history-csv artifacts/history.csv             --phase-a-asof-csv artifacts/phase-a-asof.csv             --phase-b-asof-csv artifacts/phase-b-asof.csv             | tee artifacts/multi-store-verification.json
+          python3 scripts/multi_store_truth_001.py verify \
+            --fixture "$FIXTURE" \
+            --manifest artifacts/crashpoint-manifest.json \
+            --current-csv artifacts/current.csv \
+            --history-csv artifacts/history.csv \
+            --phase-a-asof-csv artifacts/phase-a-asof.csv \
+            --phase-b-asof-csv artifacts/phase-b-asof.csv \
+            | tee artifacts/multi-store-verification.json
 
       - name: Upload MULTI-STORE-TRUTH-001 evidence pack
         if: always()
