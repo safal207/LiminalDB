@@ -302,8 +302,10 @@ def build_envelope(
         "mapping_contract": copy.deepcopy(fixture["mapping_contract"]),
         "temporal_claim": (
             "XTDB stores system-time knowledge revisions from this bridge run. "
+            "All rows share an explicit projection-only valid-time anchor "
+            "(2000-01-01T00:00:00Z) solely to keep system-version history deterministic. "
             "The source durability proof does not carry authoritative world-event timestamps, "
-            "so this bridge makes no new valid-time claim."
+            "so this bridge makes no source valid-time claim."
         ),
         "actions": actions,
         "claim_ceiling": fixture["mapping_contract"]["claim_ceiling"],
@@ -333,6 +335,7 @@ XTDB_COLUMNS = [
     "source_recovery_decision",
     "source_commit",
     "envelope_sha256",
+    "_valid_from",
 ]
 
 
@@ -381,6 +384,7 @@ def xtdb_row(
         sql_text(source["recovery_decision"]),
         sql_text(source_commit),
         sql_text(envelope_sha256),
+        "TIMESTAMP '2000-01-01T00:00:00Z'",
     ]
     return "(" + ", ".join(values) + ")"
 
