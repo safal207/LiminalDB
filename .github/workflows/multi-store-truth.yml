@@ -1,0 +1,198 @@
+name: Multi-Store Truth Boundary
+
+on:
+  workflow_dispatch:
+  pull_request:
+    branches:
+      - main
+      - feat/xtdb-liminaldb-001
+    paths:
+      - "scripts/multi_store_truth_001.py"
+      - "docs/integrations/MULTI_STORE_TRUTH_001.md"
+      - ".github/workflows/multi-store-truth.yml"
+      - "scripts/xtdb_liminaldb_001.py"
+      - "scripts/validate_crashpoint_action_readback_fixture.py"
+      - "liminal-db/crates/liminal-store/tests/crashpoint_action_readback_fixture.rs"
+      - "liminal-db/crates/liminal-store/tests/fixtures/crashpoint_action_readback_v0.1.json"
+
+permissions:
+  contents: read
+
+env:
+  EXACT_HEAD: ${{ github.event.pull_request.head.sha || github.sha }}
+  XTDB_IMAGE: ghcr.io/xtdb/xtdb:2.1.0
+  CRASHPOINT_COMMIT: bb9cd47c4b0b02527aab7b369d17b32829cc4e20
+  CRASHPOINT_BUNDLE: evidence/action_readback/action_readback_self_reviewed_v2
+  FIXTURE: liminal-db/crates/liminal-store/tests/fixtures/crashpoint_action_readback_v0.1.json
+  PGHOST: localhost
+  PGPORT: "5432"
+  PGUSER: xtdb
+  PGDATABASE: xtdb
+
+jobs:
+  verify:
+    runs-on: ubuntu-latest
+    timeout-minutes: 30
+
+    services:
+      xtdb:
+        image: ghcr.io/xtdb/xtdb:2.1.0
+        ports:
+          - 5432:5432
+          - 8080:8080
+
+    steps:
+      - name: Checkout exact PR head
+        uses: actions/checkout@v6
+        with:
+          ref: ${{ env.EXACT_HEAD }}
+          fetch-depth: 1
+          persist-credentials: false
+
+      - name: Verify exact checked-out head
+        shell: bash
+        run: |
+          set -euo pipefail
+          test "$(git rev-parse HEAD)" = "$EXACT_HEAD"
+
+      - name: Set up Rust
+        uses: dtolnay/rust-toolchain@stable
+        with:
+          components: rustfmt
+
+      - name: Install PostgreSQL client
+        shell: bash
+        run: |
+          set -euo pipefail
+          sudo apt-get update
+          sudo apt-get install -y postgresql-client
+
+      - name: Wait for XTDB v2.1.0
+        shell: bash
+        run: |
+          set -euo pipefail
+          for attempt in $(seq 1 60); do
+            if curl --fail --silent http://localhost:8080/healthz/alive >/dev/null; then
+              echo "XTDB alive after $attempt attempts"
+              exit 0
+            fi
+            sleep 1
+          done
+          echo "XTDB did not become healthy" >&2
+          exit 1
+
+      - name: Fetch pinned Crashpoint evidence
+        shell: bash
+        run: |
+          set -euo pipefail
+          mkdir -p artifacts
+          base="https://raw.githubusercontent.com/mstevens843/crashpoint/$CRASHPOINT_COMMIT/$CRASHPOINT_BUNDLE"
+          curl --fail --silent --show-error --location --retry 3             "$base/manifest.json"             -o artifacts/crashpoint-manifest.json
+          curl --fail --silent --show-error --location --retry 3             "$base/prediction.json"             -o artifacts/crashpoint-prediction.json
+          cp "$FIXTURE" artifacts/liminaldb-mapping-fixture.json
+
+      - name: Reconfirm source-to-LiminalDB mapping
+        shell: bash
+        run: |
+          set -euo pipefail
+          python3 scripts/validate_crashpoint_action_readback_fixture.py             --fixture "$FIXTURE"             --manifest artifacts/crashpoint-manifest.json             --prediction artifacts/crashpoint-prediction.json             | tee artifacts/source-mapping-verification.json
+
+      - name: Re-run LiminalDB mapping and replay
+        shell: bash
+        run: |
+          set -euo pipefail
+          cargo test --locked -p liminal-store             --test crashpoint_action_readback_fixture -- --nocapture             | tee artifacts/liminaldb-replay.txt
+
+      - name: Prepare three-phase XTDB projection
+        shell: bash
+        run: |
+          set -euo pipefail
+          python3 -m py_compile scripts/xtdb_liminaldb_001.py scripts/multi_store_truth_001.py
+          python3 scripts/multi_store_truth_001.py prepare             --fixture "$FIXTURE"             --manifest artifacts/crashpoint-manifest.json             --phase-a-sql artifacts/phase-a-claim.sql             --phase-b-sql artifacts/phase-b-unavailable.sql             --phase-c-sql artifacts/phase-c-readback.sql             | tee artifacts/multi-store-prepare.json
+
+      - name: Phase A - claim only
+        shell: bash
+        run: |
+          set -euo pipefail
+          psql -X -v ON_ERROR_STOP=1 -f artifacts/phase-a-claim.sql
+          PHASE_A_SYSTEM_TIME="$(psql -X -At -v ON_ERROR_STOP=1             -c "SELECT system_time FROM xt.txs WHERE committed = true ORDER BY _id DESC LIMIT 1"             | tail -n1 | tr -d '"')"
+          test -n "$PHASE_A_SYSTEM_TIME"
+          printf '%s
+' "$PHASE_A_SYSTEM_TIME" | tee artifacts/phase-a-system-time.txt
+
+      - name: Phase B - readback unavailable
+        shell: bash
+        run: |
+          set -euo pipefail
+          sleep 1
+          psql -X -v ON_ERROR_STOP=1 -f artifacts/phase-b-unavailable.sql
+          PHASE_B_SYSTEM_TIME="$(psql -X -At -v ON_ERROR_STOP=1             -c "SELECT system_time FROM xt.txs WHERE committed = true ORDER BY _id DESC LIMIT 1"             | tail -n1 | tr -d '"')"
+          PHASE_A_SYSTEM_TIME="$(cat artifacts/phase-a-system-time.txt)"
+          test -n "$PHASE_B_SYSTEM_TIME"
+          test "$PHASE_A_SYSTEM_TIME" != "$PHASE_B_SYSTEM_TIME"
+          printf '%s
+' "$PHASE_B_SYSTEM_TIME" | tee artifacts/phase-b-system-time.txt
+
+      - name: Phase C - authoritative readback restored where source permits
+        shell: bash
+        run: |
+          set -euo pipefail
+          sleep 1
+          psql -X -v ON_ERROR_STOP=1 -f artifacts/phase-c-readback.sql
+          PHASE_C_SYSTEM_TIME="$(psql -X -At -v ON_ERROR_STOP=1             -c "SELECT system_time FROM xt.txs WHERE committed = true ORDER BY _id DESC LIMIT 1"             | tail -n1 | tr -d '"')"
+          PHASE_B_SYSTEM_TIME="$(cat artifacts/phase-b-system-time.txt)"
+          test -n "$PHASE_C_SYSTEM_TIME"
+          test "$PHASE_B_SYSTEM_TIME" != "$PHASE_C_SYSTEM_TIME"
+          printf '%s
+' "$PHASE_C_SYSTEM_TIME" | tee artifacts/phase-c-system-time.txt
+
+      - name: Capture current and historical views
+        shell: bash
+        run: |
+          set -euo pipefail
+          PHASE_A_SYSTEM_TIME="$(cat artifacts/phase-a-system-time.txt)"
+          PHASE_B_SYSTEM_TIME="$(cat artifacts/phase-b-system-time.txt)"
+          cols='_id, trial_id, case_id, knowledge_state, readback_stage, source_observation_availability, client_claim, external_outcome, observation_availability, externally_verified, effect_count, digests_match_admission, liminal_execution, liminal_response_integrity, liminal_causal_validity, liminal_continuity_posture, side_effect_committed, source_publication_commit, _valid_from, _valid_to, _system_from, _system_to'
+
+          psql -X --csv -v ON_ERROR_STOP=1             -c "SELECT $cols FROM multi_store_truth_evidence ORDER BY trial_id"             > artifacts/current.csv
+
+          psql -X --csv -v ON_ERROR_STOP=1             -c "SELECT $cols FROM multi_store_truth_evidence FOR SYSTEM_TIME ALL FOR VALID_TIME ALL ORDER BY trial_id, _system_from"             > artifacts/history.csv
+
+          psql -X --csv -v ON_ERROR_STOP=1             -c "SELECT $cols FROM multi_store_truth_evidence FOR SYSTEM_TIME AS OF TIMESTAMP '$PHASE_A_SYSTEM_TIME' FOR VALID_TIME ALL ORDER BY trial_id"             > artifacts/phase-a-asof.csv
+
+          psql -X --csv -v ON_ERROR_STOP=1             -c "SELECT $cols FROM multi_store_truth_evidence FOR SYSTEM_TIME AS OF TIMESTAMP '$PHASE_B_SYSTEM_TIME' FOR VALID_TIME ALL ORDER BY trial_id"             > artifacts/phase-b-asof.csv
+
+          psql -X --csv -v ON_ERROR_STOP=1             -c "SELECT _id, committed, error, system_time FROM xt.txs ORDER BY _id"             > artifacts/xtdb-transactions.csv
+
+      - name: Verify cross-layer truth boundaries
+        shell: bash
+        run: |
+          set -euo pipefail
+          python3 scripts/multi_store_truth_001.py verify             --fixture "$FIXTURE"             --manifest artifacts/crashpoint-manifest.json             --current-csv artifacts/current.csv             --history-csv artifacts/history.csv             --phase-a-asof-csv artifacts/phase-a-asof.csv             --phase-b-asof-csv artifacts/phase-b-asof.csv             | tee artifacts/multi-store-verification.json
+
+      - name: Upload MULTI-STORE-TRUTH-001 evidence pack
+        if: always()
+        uses: actions/upload-artifact@v4
+        with:
+          name: multi-store-truth-001
+          path: |
+            artifacts/crashpoint-manifest.json
+            artifacts/crashpoint-prediction.json
+            artifacts/liminaldb-mapping-fixture.json
+            artifacts/source-mapping-verification.json
+            artifacts/liminaldb-replay.txt
+            artifacts/multi-store-prepare.json
+            artifacts/phase-a-claim.sql
+            artifacts/phase-b-unavailable.sql
+            artifacts/phase-c-readback.sql
+            artifacts/phase-a-system-time.txt
+            artifacts/phase-b-system-time.txt
+            artifacts/phase-c-system-time.txt
+            artifacts/current.csv
+            artifacts/history.csv
+            artifacts/phase-a-asof.csv
+            artifacts/phase-b-asof.csv
+            artifacts/xtdb-transactions.csv
+            artifacts/multi-store-verification.json
+          if-no-files-found: warn
+          retention-days: 30
