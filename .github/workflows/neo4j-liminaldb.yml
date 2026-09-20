@@ -1,0 +1,150 @@
+name: Neo4j LiminalDB Causal Projection
+
+on:
+  workflow_dispatch:
+  pull_request:
+    branches:
+      - main
+      - feat/xtdb-liminaldb-001
+    paths:
+      - "scripts/neo4j_liminaldb_001.py"
+      - "docs/integrations/NEO4J_LIMINALDB_V0_1.md"
+      - ".github/workflows/neo4j-liminaldb.yml"
+      - "liminal-db/crates/liminal-store/tests/fixtures/crashpoint_action_readback_v0.1.json"
+      - "scripts/validate_crashpoint_action_readback_fixture.py"
+
+permissions:
+  contents: read
+
+env:
+  EXACT_HEAD: ${{ github.event.pull_request.head.sha || github.sha }}
+  NEO4J_IMAGE: neo4j:2026.08.1
+  CRASHPOINT_COMMIT: bb9cd47c4b0b02527aab7b369d17b32829cc4e20
+  CRASHPOINT_BUNDLE: evidence/action_readback/action_readback_self_reviewed_v2
+  FIXTURE: liminal-db/crates/liminal-store/tests/fixtures/crashpoint_action_readback_v0.1.json
+
+jobs:
+  verify:
+    runs-on: ubuntu-latest
+    timeout-minutes: 25
+
+    steps:
+      - name: Checkout exact PR head
+        uses: actions/checkout@v6
+        with:
+          ref: ${{ env.EXACT_HEAD }}
+          fetch-depth: 1
+          persist-credentials: false
+
+      - name: Verify exact checked-out head
+        shell: bash
+        run: |
+          set -euo pipefail
+          test "$(git rev-parse HEAD)" = "$EXACT_HEAD"
+
+      - name: Start Neo4j 2026.08.1 Community
+        shell: bash
+        run: |
+          set -euo pipefail
+          mkdir -p artifacts
+          docker pull "$NEO4J_IMAGE"
+          docker run --detach --name neo4j-evidence             --publish 7474:7474             --publish 7687:7687             --env "NEO4J_AUTH=none"             "$NEO4J_IMAGE"
+          docker ps --filter name=neo4j-evidence
+
+      - name: Wait for Neo4j Bolt readiness
+        shell: bash
+        run: |
+          set -euo pipefail
+          for attempt in $(seq 1 90); do
+            if docker exec neo4j-evidence cypher-shell               --format plain               "RETURN 1 AS ready;" >/dev/null 2>&1; then
+              echo "Neo4j ready after $attempt attempts"
+              exit 0
+            fi
+            sleep 1
+          done
+          docker logs neo4j-evidence
+          echo "Neo4j did not become ready" >&2
+          exit 1
+
+      - name: Fetch pinned Crashpoint evidence
+        shell: bash
+        run: |
+          set -euo pipefail
+          mkdir -p artifacts
+          base="https://raw.githubusercontent.com/mstevens843/crashpoint/${CRASHPOINT_COMMIT}/${CRASHPOINT_BUNDLE}"
+          curl --fail --silent --show-error --location --retry 3             "$base/manifest.json"             -o artifacts/crashpoint-manifest.json
+          curl --fail --silent --show-error --location --retry 3             "$base/prediction.json"             -o artifacts/crashpoint-prediction.json
+          cp "$FIXTURE" artifacts/liminaldb-mapping-fixture.json
+
+      - name: Reconfirm pinned Crashpoint mapping
+        shell: bash
+        run: |
+          set -euo pipefail
+          python3 scripts/validate_crashpoint_action_readback_fixture.py             --fixture "$FIXTURE"             --manifest artifacts/crashpoint-manifest.json             --prediction artifacts/crashpoint-prediction.json             | tee artifacts/source-mapping-verification.json
+
+      - name: Prepare causal graph and invariant queries
+        shell: bash
+        run: |
+          set -euo pipefail
+          python3 -m py_compile scripts/neo4j_liminaldb_001.py
+          python3 scripts/neo4j_liminaldb_001.py prepare             --fixture "$FIXTURE"             --manifest artifacts/crashpoint-manifest.json             --load-cypher artifacts/neo4j-load.cypher             --verify-cypher artifacts/neo4j-verify.cypher             | tee artifacts/neo4j-prepare.json
+
+      - name: Load causal projection into Neo4j
+        shell: bash
+        run: |
+          set -euo pipefail
+          docker exec -i neo4j-evidence cypher-shell             --format plain             < artifacts/neo4j-load.cypher             | tee artifacts/neo4j-load.txt
+
+      - name: Execute causal graph invariants
+        shell: bash
+        run: |
+          set -euo pipefail
+          docker exec -i neo4j-evidence cypher-shell             --format plain             < artifacts/neo4j-verify.cypher             | tee artifacts/neo4j-checks.txt
+
+      - name: Verify causal checks offline
+        shell: bash
+        run: |
+          set -euo pipefail
+          python3 scripts/neo4j_liminaldb_001.py verify             --checks artifacts/neo4j-checks.txt             | tee artifacts/neo4j-liminaldb-verification.json
+
+      - name: Capture graph version and explanation rows
+        shell: bash
+        run: |
+          set -euo pipefail
+          docker exec neo4j-evidence cypher-shell             --format plain             "CALL dbms.components() YIELD name, versions RETURN name, versions[0] AS version;"             | tee artifacts/neo4j-version.txt
+
+          docker exec neo4j-evidence cypher-shell             --format plain             "MATCH (a:Action)-[:HAS_CLAIM]->(cl:Claim)-[:EVALUATED_AGAINST]->(o:Observation)-[:INFORMS]->(c:Continuity)
+             OPTIONAL MATCH (o)-[:OBSERVES]->(e:Effect)
+             RETURN a.trial_id AS trial_id, a.case_id AS case_id, cl.value AS client_claim,
+                    o.availability AS availability, o.external_outcome AS external_outcome,
+                    count(e) AS retained_effects, c.posture AS continuity
+             ORDER BY trial_id;"             | tee artifacts/neo4j-explanation-rows.txt
+
+      - name: Upload NEO4J-LIMINALDB-001 evidence pack
+        if: always()
+        uses: actions/upload-artifact@v4
+        with:
+          name: neo4j-liminaldb-001
+          path: |
+            artifacts/crashpoint-manifest.json
+            artifacts/crashpoint-prediction.json
+            artifacts/liminaldb-mapping-fixture.json
+            artifacts/source-mapping-verification.json
+            artifacts/neo4j-prepare.json
+            artifacts/neo4j-load.cypher
+            artifacts/neo4j-verify.cypher
+            artifacts/neo4j-load.txt
+            artifacts/neo4j-checks.txt
+            artifacts/neo4j-liminaldb-verification.json
+            artifacts/neo4j-version.txt
+            artifacts/neo4j-image-digests.json
+            artifacts/neo4j-explanation-rows.txt
+          if-no-files-found: warn
+          retention-days: 30
+
+      - name: Stop Neo4j
+        if: always()
+        shell: bash
+        run: |
+          docker logs neo4j-evidence > artifacts/neo4j-container.log 2>&1 || true
+          docker rm -f neo4j-evidence || true
