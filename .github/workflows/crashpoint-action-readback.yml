@@ -15,6 +15,7 @@ permissions:
   contents: read
 
 env:
+  EXACT_HEAD: ${{ github.event.pull_request.head.sha || github.sha }}
   CRASHPOINT_COMMIT: bb9cd47c4b0b02527aab7b369d17b32829cc4e20
   CRASHPOINT_BUNDLE: evidence/action_readback/action_readback_self_reviewed_v2
   FIXTURE: liminal-db/crates/liminal-store/tests/fixtures/crashpoint_action_readback_v0.1.json
@@ -28,7 +29,15 @@ jobs:
       - name: Checkout exact PR head
         uses: actions/checkout@v6
         with:
+          ref: ${{ env.EXACT_HEAD }}
+          fetch-depth: 1
           persist-credentials: false
+
+      - name: Verify exact checked-out head
+        shell: bash
+        run: |
+          set -euo pipefail
+          test "$(git rev-parse HEAD)" = "$EXACT_HEAD"
 
       - name: Set up Rust
         uses: dtolnay/rust-toolchain@stable
