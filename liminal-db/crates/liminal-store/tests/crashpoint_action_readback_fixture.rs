@@ -117,12 +117,13 @@ fn source_contract(case: &Value) {
     if source["external_outcome"] == "NO_EFFECT" {
         assert_eq!(source["externally_verified"], true, "{case_id}");
         assert_eq!(source["effect_count"], 0, "{case_id}");
-        assert_eq!(liminal["continuity_posture"], "RETRY_SIDE_EFFECT", "{case_id}");
+        assert_eq!(
+            liminal["continuity_posture"], "RETRY_SIDE_EFFECT",
+            "{case_id}"
+        );
     }
 
-    if source["client_claim"] == "LOST"
-        && source["external_outcome"] == "ONE_EFFECT_MATCHING"
-    {
+    if source["client_claim"] == "LOST" && source["external_outcome"] == "ONE_EFFECT_MATCHING" {
         assert_eq!(liminal["response_integrity"], "UNKNOWN", "{case_id}");
         assert_eq!(liminal["continuity_posture"], "REPORT_ONLY", "{case_id}");
     }
