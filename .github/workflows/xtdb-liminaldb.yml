@@ -1,0 +1,196 @@
+name: XTDB LiminalDB Bitemporal Projection
+
+on:
+  workflow_dispatch:
+  pull_request:
+    branches:
+      - main
+      - feat/crashpoint-liminaldb-001
+    paths:
+      - "scripts/xtdb_liminaldb_001.py"
+      - "docs/integrations/XTDB_LIMINALDB_V0_1.md"
+      - ".github/workflows/xtdb-liminaldb.yml"
+      - "liminal-db/crates/liminal-store/tests/fixtures/crashpoint_action_readback_v0.1.json"
+      - "scripts/validate_crashpoint_action_readback_fixture.py"
+
+permissions:
+  contents: read
+
+env:
+  EXACT_HEAD: ${{ github.event.pull_request.head.sha || github.sha }}
+  XTDB_IMAGE: ghcr.io/xtdb/xtdb:2.1.0
+  CRASHPOINT_COMMIT: bb9cd47c4b0b02527aab7b369d17b32829cc4e20
+  CRASHPOINT_BUNDLE: evidence/action_readback/action_readback_self_reviewed_v2
+  FIXTURE: liminal-db/crates/liminal-store/tests/fixtures/crashpoint_action_readback_v0.1.json
+  PGHOST: localhost
+  PGPORT: "5432"
+  PGUSER: xtdb
+  PGDATABASE: xtdb
+
+jobs:
+  verify:
+    runs-on: ubuntu-latest
+    timeout-minutes: 25
+
+    services:
+      xtdb:
+        image: ghcr.io/xtdb/xtdb:2.1.0
+        ports:
+          - 5432:5432
+          - 8080:8080
+
+    steps:
+      - name: Checkout exact PR head
+        uses: actions/checkout@v6
+        with:
+          ref: ${{ env.EXACT_HEAD }}
+          fetch-depth: 1
+          persist-credentials: false
+
+      - name: Verify exact checked-out head
+        shell: bash
+        run: |
+          set -euo pipefail
+          test "$(git rev-parse HEAD)" = "$EXACT_HEAD"
+
+      - name: Install PostgreSQL client
+        shell: bash
+        run: |
+          set -euo pipefail
+          sudo apt-get update
+          sudo apt-get install -y postgresql-client
+
+      - name: Wait for XTDB v2.1.0
+        shell: bash
+        run: |
+          set -euo pipefail
+          for attempt in $(seq 1 60); do
+            if curl --fail --silent http://localhost:8080/healthz/alive >/dev/null; then
+              echo "XTDB alive after $attempt attempts"
+              exit 0
+            fi
+            sleep 1
+          done
+          echo "XTDB did not become healthy" >&2
+          exit 1
+
+      - name: Fetch pinned Crashpoint evidence
+        shell: bash
+        run: |
+          set -euo pipefail
+          mkdir -p artifacts
+          base="https://raw.githubusercontent.com/mstevens843/crashpoint/${CRASHPOINT_COMMIT}/${CRASHPOINT_BUNDLE}"
+          curl --fail --silent --show-error --location --retry 3 \
+            "$base/manifest.json" \
+            -o artifacts/crashpoint-manifest.json
+          curl --fail --silent --show-error --location --retry 3 \
+            "$base/prediction.json" \
+            -o artifacts/crashpoint-prediction.json
+          cp "$FIXTURE" artifacts/liminaldb-mapping-fixture.json
+
+      - name: Reconfirm pinned Crashpoint mapping
+        shell: bash
+        run: |
+          set -euo pipefail
+          python3 scripts/validate_crashpoint_action_readback_fixture.py \
+            --fixture "$FIXTURE" \
+            --manifest artifacts/crashpoint-manifest.json \
+            --prediction artifacts/crashpoint-prediction.json \
+            | tee artifacts/source-mapping-verification.json
+
+      - name: Prepare XTDB phase SQL
+        shell: bash
+        run: |
+          set -euo pipefail
+          python3 -m py_compile scripts/xtdb_liminaldb_001.py
+          python3 scripts/xtdb_liminaldb_001.py prepare \
+            --fixture "$FIXTURE" \
+            --manifest artifacts/crashpoint-manifest.json \
+            --phase-a-sql artifacts/xtdb-phase-a.sql \
+            --phase-b-sql artifacts/xtdb-phase-b.sql \
+            | tee artifacts/xtdb-prepare.json
+
+      - name: Insert claim-only knowledge
+        shell: bash
+        run: |
+          set -euo pipefail
+          psql -X -v ON_ERROR_STOP=1 -f artifacts/xtdb-phase-a.sql
+          PHASE_A_SYSTEM_TIME="$(psql -X -At -v ON_ERROR_STOP=1 \
+            -c "SELECT system_time FROM xt.txs WHERE committed = true ORDER BY _id DESC LIMIT 1" \
+            | tail -n1 | tr -d '"')"
+          test -n "$PHASE_A_SYSTEM_TIME"
+          printf '%s\n' "$PHASE_A_SYSTEM_TIME" | tee artifacts/phase-a-system-time.txt
+
+      - name: Insert authoritative readback knowledge
+        shell: bash
+        run: |
+          set -euo pipefail
+          sleep 1
+          psql -X -v ON_ERROR_STOP=1 -f artifacts/xtdb-phase-b.sql
+          PHASE_B_SYSTEM_TIME="$(psql -X -At -v ON_ERROR_STOP=1 \
+            -c "SELECT system_time FROM xt.txs WHERE committed = true ORDER BY _id DESC LIMIT 1" \
+            | tail -n1 | tr -d '"')"
+          PHASE_A_SYSTEM_TIME="$(cat artifacts/phase-a-system-time.txt)"
+          test -n "$PHASE_A_SYSTEM_TIME"
+          test -n "$PHASE_B_SYSTEM_TIME"
+          printf '%s\n' "$PHASE_B_SYSTEM_TIME" | tee artifacts/phase-b-system-time.txt
+          test "$PHASE_A_SYSTEM_TIME" != "$PHASE_B_SYSTEM_TIME"
+
+      - name: Capture XTDB current and bitemporal views
+        shell: bash
+        run: |
+          set -euo pipefail
+          PHASE_A_SYSTEM_TIME="$(cat artifacts/phase-a-system-time.txt)"
+
+          cols='_id, trial_id, case_id, knowledge_state, client_claim, external_outcome, observation_availability, externally_verified, effect_count, digests_match_admission, liminal_execution, liminal_response_integrity, liminal_causal_validity, liminal_continuity_posture, side_effect_committed, source_publication_commit, _valid_from, _valid_to, _system_from, _system_to'
+
+          psql -X --csv -v ON_ERROR_STOP=1 \
+            -c "SELECT $cols FROM crashpoint_xtdb_evidence ORDER BY trial_id" \
+            > artifacts/xtdb-current.csv
+
+          psql -X --csv -v ON_ERROR_STOP=1 \
+            -c "SELECT $cols FROM crashpoint_xtdb_evidence FOR SYSTEM_TIME ALL FOR VALID_TIME ALL ORDER BY trial_id, _system_from" \
+            > artifacts/xtdb-history.csv
+
+          psql -X --csv -v ON_ERROR_STOP=1 \
+            -c "SELECT $cols FROM crashpoint_xtdb_evidence FOR SYSTEM_TIME AS OF TIMESTAMP '$PHASE_A_SYSTEM_TIME' FOR VALID_TIME ALL ORDER BY trial_id" \
+            > artifacts/xtdb-phase-a-asof.csv
+
+          psql -X --csv -v ON_ERROR_STOP=1 \
+            -c "SELECT _id, committed, error, system_time FROM xt.txs ORDER BY _id" \
+            > artifacts/xtdb-transactions.csv
+
+      - name: Verify XTDB temporal invariants against LiminalDB mapping
+        shell: bash
+        run: |
+          set -euo pipefail
+          python3 scripts/xtdb_liminaldb_001.py verify \
+            --fixture "$FIXTURE" \
+            --manifest artifacts/crashpoint-manifest.json \
+            --current-csv artifacts/xtdb-current.csv \
+            --history-csv artifacts/xtdb-history.csv \
+            --asof-csv artifacts/xtdb-phase-a-asof.csv \
+            | tee artifacts/xtdb-liminaldb-verification.json
+
+      - name: Upload XTDB-LIMINALDB-001 evidence pack
+        if: always()
+        uses: actions/upload-artifact@v4
+        with:
+          name: xtdb-liminaldb-001
+          path: |
+            artifacts/crashpoint-manifest.json
+            artifacts/crashpoint-prediction.json
+            artifacts/liminaldb-mapping-fixture.json
+            artifacts/source-mapping-verification.json
+            artifacts/xtdb-prepare.json
+            artifacts/xtdb-phase-a.sql
+            artifacts/xtdb-phase-b.sql
+            artifacts/phase-a-system-time.txt
+            artifacts/phase-b-system-time.txt
+            artifacts/xtdb-current.csv
+            artifacts/xtdb-history.csv
+            artifacts/xtdb-phase-a-asof.csv
+            artifacts/xtdb-transactions.csv
+            artifacts/xtdb-liminaldb-verification.json
+          if-no-files-found: warn
+          retention-days: 30
