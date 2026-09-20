@@ -129,11 +129,11 @@ jobs:
           PHASE_B_SYSTEM_TIME="$(psql -X -At -v ON_ERROR_STOP=1 \
             -c "SELECT system_time FROM xt.txs WHERE committed = true ORDER BY _id DESC LIMIT 1" \
             | tail -n1 | tr -d '"')"
+          PHASE_A_SYSTEM_TIME="$(cat artifacts/phase-a-system-time.txt)"
+          test -n "$PHASE_A_SYSTEM_TIME"
           test -n "$PHASE_B_SYSTEM_TIME"
           printf '%s\n' "$PHASE_B_SYSTEM_TIME" | tee artifacts/phase-b-system-time.txt
           test "$PHASE_A_SYSTEM_TIME" != "$PHASE_B_SYSTEM_TIME"
-        env:
-          PHASE_A_SYSTEM_TIME: ${{ steps.phase_a.outputs.system_time }}
 
       - name: Capture XTDB current and bitemporal views
         shell: bash
