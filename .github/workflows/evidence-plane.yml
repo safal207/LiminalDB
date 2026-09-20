@@ -1,0 +1,312 @@
+name: Evidence Plane Integration
+
+on:
+  workflow_dispatch:
+  pull_request:
+    branches:
+      - main
+      - feat/neo4j-liminaldb-001
+    paths:
+      - "scripts/evidence_plane_001.py"
+      - "docs/integrations/EVIDENCE_PLANE_V0_1.md"
+      - ".github/workflows/evidence-plane.yml"
+      - "scripts/xtdb_liminaldb_001.py"
+      - "scripts/neo4j_liminaldb_001.py"
+      - "scripts/validate_crashpoint_action_readback_fixture.py"
+      - "liminal-db/crates/liminal-store/tests/crashpoint_action_readback_fixture.rs"
+      - "liminal-db/crates/liminal-store/tests/fixtures/crashpoint_action_readback_v0.1.json"
+
+permissions:
+  contents: read
+
+env:
+  EXACT_HEAD: ${{ github.event.pull_request.head.sha || github.sha }}
+  XTDB_IMAGE: ghcr.io/xtdb/xtdb:2.1.0
+  NEO4J_IMAGE: neo4j:2026.08.1
+  CRASHPOINT_COMMIT: bb9cd47c4b0b02527aab7b369d17b32829cc4e20
+  CRASHPOINT_BUNDLE: evidence/action_readback/action_readback_self_reviewed_v2
+  FIXTURE: liminal-db/crates/liminal-store/tests/fixtures/crashpoint_action_readback_v0.1.json
+  PGHOST: localhost
+  PGPORT: "5432"
+  PGUSER: xtdb
+  PGDATABASE: xtdb
+
+jobs:
+  verify:
+    runs-on: ubuntu-latest
+    timeout-minutes: 35
+
+    services:
+      xtdb:
+        image: ghcr.io/xtdb/xtdb:2.1.0
+        ports:
+          - 5432:5432
+          - 8080:8080
+
+    steps:
+      - name: Checkout exact PR head
+        uses: actions/checkout@v6
+        with:
+          ref: ${{ env.EXACT_HEAD }}
+          fetch-depth: 1
+          persist-credentials: false
+
+      - name: Verify exact checked-out head
+        shell: bash
+        run: |
+          set -euo pipefail
+          test "$(git rev-parse HEAD)" = "$EXACT_HEAD"
+
+      - name: Set up Rust
+        uses: dtolnay/rust-toolchain@stable
+
+      - name: Install PostgreSQL client
+        shell: bash
+        run: |
+          set -euo pipefail
+          sudo apt-get update
+          sudo apt-get install -y postgresql-client
+
+      - name: Wait for XTDB
+        shell: bash
+        run: |
+          set -euo pipefail
+          for attempt in $(seq 1 60); do
+            if curl --fail --silent http://localhost:8080/healthz/alive >/dev/null; then
+              echo "XTDB alive after $attempt attempts"
+              exit 0
+            fi
+            sleep 1
+          done
+          echo "XTDB did not become healthy" >&2
+          exit 1
+
+      - name: Start Neo4j
+        shell: bash
+        run: |
+          set -euo pipefail
+          mkdir -p artifacts
+          docker pull "$NEO4J_IMAGE"
+          docker run --detach --name evidence-plane-neo4j \
+            --publish 7474:7474 \
+            --publish 7687:7687 \
+            --env "NEO4J_AUTH=none" \
+            "$NEO4J_IMAGE"
+
+      - name: Wait for Neo4j
+        shell: bash
+        run: |
+          set -euo pipefail
+          for attempt in $(seq 1 90); do
+            if docker exec evidence-plane-neo4j cypher-shell \
+              --format plain "RETURN 1 AS ready;" >/dev/null 2>&1; then
+              echo "Neo4j ready after $attempt attempts"
+              exit 0
+            fi
+            sleep 1
+          done
+          docker logs evidence-plane-neo4j
+          echo "Neo4j did not become ready" >&2
+          exit 1
+
+      - name: Fetch pinned Crashpoint evidence
+        shell: bash
+        run: |
+          set -euo pipefail
+          mkdir -p artifacts
+          base="https://raw.githubusercontent.com/mstevens843/crashpoint/${CRASHPOINT_COMMIT}/${CRASHPOINT_BUNDLE}"
+          curl --fail --silent --show-error --location --retry 3 \
+            "$base/manifest.json" \
+            -o artifacts/crashpoint-manifest.json
+          curl --fail --silent --show-error --location --retry 3 \
+            "$base/prediction.json" \
+            -o artifacts/crashpoint-prediction.json
+          cp "$FIXTURE" artifacts/repository-liminaldb-fixture.json
+
+      - name: Reconfirm raw source mapping
+        shell: bash
+        run: |
+          set -euo pipefail
+          python3 scripts/validate_crashpoint_action_readback_fixture.py \
+            --fixture "$FIXTURE" \
+            --manifest artifacts/crashpoint-manifest.json \
+            --prediction artifacts/crashpoint-prediction.json \
+            | tee artifacts/source-mapping-verification.json
+
+      - name: Build canonical evidence envelope
+        shell: bash
+        run: |
+          set -euo pipefail
+          python3 -m py_compile scripts/evidence_plane_001.py
+          python3 scripts/evidence_plane_001.py build \
+            --fixture "$FIXTURE" \
+            --manifest artifacts/crashpoint-manifest.json \
+            --envelope artifacts/canonical-evidence-envelope.json \
+            --projection-manifest artifacts/evidence-plane-projection-manifest.json \
+            --projection-fixture artifacts/evidence-plane-projection-fixture.json \
+            | tee artifacts/evidence-plane-prepare.json
+
+          python3 scripts/evidence_plane_001.py negative-controls \
+            --envelope artifacts/canonical-evidence-envelope.json \
+            --report artifacts/evidence-plane-negative-controls.json
+
+          python3 scripts/evidence_plane_001.py compare-fixture \
+            --envelope artifacts/canonical-evidence-envelope.json \
+            --fixture "$FIXTURE" \
+            | tee artifacts/evidence-plane-liminal-fixture-check.json
+
+      - name: Run LiminalDB continuity and replay gate
+        shell: bash
+        run: |
+          set -euo pipefail
+          cargo test --locked -p liminal-store \
+            --test crashpoint_action_readback_fixture -- --nocapture \
+            | tee artifacts/liminaldb-runtime-mapping.txt
+          printf 'PASS\n' > artifacts/liminaldb-runtime-marker.txt
+
+      - name: Prepare XTDB projection from envelope-derived inputs
+        shell: bash
+        run: |
+          set -euo pipefail
+          python3 -m py_compile scripts/xtdb_liminaldb_001.py
+          python3 scripts/xtdb_liminaldb_001.py prepare \
+            --fixture artifacts/evidence-plane-projection-fixture.json \
+            --manifest artifacts/evidence-plane-projection-manifest.json \
+            --phase-a-sql artifacts/xtdb-phase-a.sql \
+            --phase-b-sql artifacts/xtdb-phase-b.sql \
+            | tee artifacts/xtdb-prepare.json
+
+      - name: Insert claim-only XTDB knowledge
+        shell: bash
+        run: |
+          set -euo pipefail
+          psql -X -v ON_ERROR_STOP=1 -f artifacts/xtdb-phase-a.sql
+          PHASE_A_SYSTEM_TIME="$(psql -X -At -v ON_ERROR_STOP=1 \
+            -c "SELECT system_time FROM xt.txs WHERE committed = true ORDER BY _id DESC LIMIT 1" \
+            | tail -n1 | tr -d '"')"
+          test -n "$PHASE_A_SYSTEM_TIME"
+          printf '%s\n' "$PHASE_A_SYSTEM_TIME" > artifacts/phase-a-system-time.txt
+
+      - name: Insert authoritative XTDB readback knowledge
+        shell: bash
+        run: |
+          set -euo pipefail
+          sleep 1
+          psql -X -v ON_ERROR_STOP=1 -f artifacts/xtdb-phase-b.sql
+          PHASE_B_SYSTEM_TIME="$(psql -X -At -v ON_ERROR_STOP=1 \
+            -c "SELECT system_time FROM xt.txs WHERE committed = true ORDER BY _id DESC LIMIT 1" \
+            | tail -n1 | tr -d '"')"
+          PHASE_A_SYSTEM_TIME="$(cat artifacts/phase-a-system-time.txt)"
+          test -n "$PHASE_B_SYSTEM_TIME"
+          test "$PHASE_A_SYSTEM_TIME" != "$PHASE_B_SYSTEM_TIME"
+          printf '%s\n' "$PHASE_B_SYSTEM_TIME" > artifacts/phase-b-system-time.txt
+
+      - name: Capture XTDB temporal and cross-axis views
+        shell: bash
+        run: |
+          set -euo pipefail
+          PHASE_A_SYSTEM_TIME="$(cat artifacts/phase-a-system-time.txt)"
+          PHASE_B_SYSTEM_TIME="$(cat artifacts/phase-b-system-time.txt)"
+          WITNESS_VALID="$(jq -r '.actions[] | select(.trial_id == "clean-0") | .admission.admitted_at_utc' artifacts/canonical-evidence-envelope.json)"
+          WITNESS_VALID_SQL="${WITNESS_VALID/+00:00/Z}"
+
+          cols='_id, trial_id, case_id, knowledge_state, client_claim, external_outcome, observation_availability, externally_verified, effect_count, digests_match_admission, liminal_execution, liminal_response_integrity, liminal_causal_validity, liminal_continuity_posture, side_effect_committed, source_publication_commit, _valid_from, _valid_to, _system_from, _system_to'
+
+          psql -X --csv -v ON_ERROR_STOP=1 \
+            -c "SELECT $cols FROM crashpoint_xtdb_evidence ORDER BY trial_id" \
+            > artifacts/xtdb-current.csv
+
+          psql -X --csv -v ON_ERROR_STOP=1 \
+            -c "SELECT $cols FROM crashpoint_xtdb_evidence FOR SYSTEM_TIME ALL FOR VALID_TIME ALL ORDER BY trial_id, _system_from" \
+            > artifacts/xtdb-history.csv
+
+          psql -X --csv -v ON_ERROR_STOP=1 \
+            -c "SELECT $cols FROM crashpoint_xtdb_evidence FOR SYSTEM_TIME AS OF TIMESTAMP '$PHASE_A_SYSTEM_TIME' FOR VALID_TIME ALL ORDER BY trial_id" \
+            > artifacts/xtdb-phase-a-asof.csv
+
+          psql -X --csv -v ON_ERROR_STOP=1 \
+            -c "SELECT $cols FROM crashpoint_xtdb_evidence FOR SYSTEM_TIME AS OF TIMESTAMP '$PHASE_A_SYSTEM_TIME' FOR VALID_TIME AS OF TIMESTAMP '$WITNESS_VALID_SQL' WHERE trial_id='clean-0'" \
+            > artifacts/xtdb-witness-before.csv
+
+          psql -X --csv -v ON_ERROR_STOP=1 \
+            -c "SELECT $cols FROM crashpoint_xtdb_evidence FOR SYSTEM_TIME AS OF TIMESTAMP '$PHASE_B_SYSTEM_TIME' FOR VALID_TIME AS OF TIMESTAMP '$WITNESS_VALID_SQL' WHERE trial_id='clean-0'" \
+            > artifacts/xtdb-witness-after.csv
+
+      - name: Verify native XTDB invariants
+        shell: bash
+        run: |
+          set -euo pipefail
+          python3 scripts/xtdb_liminaldb_001.py verify \
+            --fixture artifacts/evidence-plane-projection-fixture.json \
+            --manifest artifacts/evidence-plane-projection-manifest.json \
+            --current-csv artifacts/xtdb-current.csv \
+            --history-csv artifacts/xtdb-history.csv \
+            --asof-csv artifacts/xtdb-phase-a-asof.csv \
+            | tee artifacts/xtdb-liminaldb-verification.json
+
+      - name: Prepare Neo4j projection from envelope-derived inputs
+        shell: bash
+        run: |
+          set -euo pipefail
+          python3 -m py_compile scripts/neo4j_liminaldb_001.py
+          python3 scripts/neo4j_liminaldb_001.py prepare \
+            --fixture artifacts/evidence-plane-projection-fixture.json \
+            --manifest artifacts/evidence-plane-projection-manifest.json \
+            --load-cypher artifacts/neo4j-load.cypher \
+            --verify-cypher artifacts/neo4j-verify.cypher \
+            | tee artifacts/neo4j-prepare.json
+
+      - name: Load and verify Neo4j explanation projection
+        shell: bash
+        run: |
+          set -euo pipefail
+          docker exec -i evidence-plane-neo4j cypher-shell \
+            --format plain < artifacts/neo4j-load.cypher \
+            | tee artifacts/neo4j-load.txt
+
+          docker exec -i evidence-plane-neo4j cypher-shell \
+            --format plain < artifacts/neo4j-verify.cypher \
+            | tee artifacts/neo4j-checks.txt
+
+          python3 scripts/neo4j_liminaldb_001.py verify \
+            --checks artifacts/neo4j-checks.txt \
+            | tee artifacts/neo4j-liminaldb-verification.json
+
+          docker exec evidence-plane-neo4j cypher-shell --format plain \
+            "MATCH (a:Action)-[:HAS_CLAIM]->(cl:Claim)-[:EVALUATED_AGAINST]->(o:Observation)-[:INFORMS]->(c:Continuity)
+             OPTIONAL MATCH (o)-[:OBSERVES]->(e:Effect)
+             RETURN a.trial_id AS trial_id, a.case_id AS case_id, cl.value AS client_claim,
+                    o.availability AS availability, o.external_outcome AS external_outcome,
+                    count(e) AS retained_effects, c.posture AS continuity
+             ORDER BY trial_id;" \
+            > artifacts/neo4j-explanation-rows.csv
+
+      - name: Verify Evidence Plane cross-projection invariants
+        shell: bash
+        run: |
+          set -euo pipefail
+          python3 scripts/evidence_plane_001.py verify \
+            --envelope artifacts/canonical-evidence-envelope.json \
+            --liminal-marker artifacts/liminaldb-runtime-marker.txt \
+            --xtdb-current artifacts/xtdb-current.csv \
+            --xtdb-history artifacts/xtdb-history.csv \
+            --xtdb-witness-before artifacts/xtdb-witness-before.csv \
+            --xtdb-witness-after artifacts/xtdb-witness-after.csv \
+            --neo4j-rows artifacts/neo4j-explanation-rows.csv \
+            --report artifacts/evidence-plane-verification.json
+
+      - name: Upload EVIDENCE-PLANE-001 evidence pack
+        if: always()
+        uses: actions/upload-artifact@v4
+        with:
+          name: evidence-plane-001
+          path: artifacts/
+          if-no-files-found: warn
+          retention-days: 30
+
+      - name: Stop Neo4j
+        if: always()
+        shell: bash
+        run: |
+          docker logs evidence-plane-neo4j > artifacts/neo4j-container.log 2>&1 || true
+          docker rm -f evidence-plane-neo4j || true
