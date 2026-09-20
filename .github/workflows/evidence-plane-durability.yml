@@ -1,0 +1,357 @@
+name: Evidence Plane Durability
+
+on:
+  workflow_dispatch:
+  pull_request:
+    branches:
+      - main
+      - feat/evidence-plane-001
+    paths:
+      - "scripts/evidence_plane_durability_001.py"
+      - "docs/integrations/EVIDENCE_PLANE_DURABILITY_V0_1.md"
+      - ".github/workflows/evidence-plane-durability.yml"
+      - "liminal-db/crates/liminal-store/tests/evidence_plane_durability_fixture.rs"
+      - "liminal-db/crates/liminal-store/tests/fixtures/evidence_plane_durability_v0.1.json"
+
+permissions:
+  contents: read
+
+env:
+  EXACT_HEAD: ${{ github.event.pull_request.head.sha || github.sha }}
+  CONTRACTGRAPH_COMMIT: aef57d1059513b0de1c7cc5945777949175b44de
+  AEGISORA_COMMIT: 2bac618215671f6f0ac8ebddf169830d4fc0f9b3
+  FIXTURE: liminal-db/crates/liminal-store/tests/fixtures/evidence_plane_durability_v0.1.json
+  PGHOST: localhost
+  PGPORT: "5432"
+  PGUSER: xtdb
+  PGDATABASE: xtdb
+  NEO4J_IMAGE: neo4j:2026.08.1
+
+jobs:
+  verify:
+    runs-on: ubuntu-latest
+    timeout-minutes: 45
+
+    services:
+      xtdb:
+        image: ghcr.io/xtdb/xtdb:2.1.0
+        ports:
+          - 5432:5432
+          - 8080:8080
+
+    steps:
+      - name: Checkout exact LiminalDB PR head
+        uses: actions/checkout@v6
+        with:
+          ref: ${{ env.EXACT_HEAD }}
+          fetch-depth: 1
+          persist-credentials: false
+
+      - name: Verify exact LiminalDB head
+        shell: bash
+        run: |
+          set -euo pipefail
+          test "$(git rev-parse HEAD)" = "$EXACT_HEAD"
+
+      - name: Set up Python
+        uses: actions/setup-python@v6
+        with:
+          python-version: "3.12"
+
+      - name: Set up Node 24
+        uses: actions/setup-node@v6
+        with:
+          node-version: "24"
+
+      - name: Activate pinned pnpm
+        shell: bash
+        run: |
+          set -euo pipefail
+          corepack enable
+          corepack prepare pnpm@11.20.0 --activate
+          pnpm --version
+
+      - name: Set up Rust
+        uses: dtolnay/rust-toolchain@stable
+
+      - name: Install PostgreSQL client
+        shell: bash
+        run: |
+          set -euo pipefail
+          sudo apt-get update
+          sudo apt-get install -y postgresql-client
+
+      - name: Wait for XTDB
+        shell: bash
+        run: |
+          set -euo pipefail
+          for attempt in $(seq 1 60); do
+            if curl --fail --silent http://localhost:8080/healthz/alive >/dev/null; then
+              echo "XTDB alive after $attempt attempts"
+              exit 0
+            fi
+            sleep 1
+          done
+          echo "XTDB did not become healthy" >&2
+          exit 1
+
+      - name: Checkout pinned ContractGraph-QA durability proof
+        shell: bash
+        run: |
+          set -euo pipefail
+          mkdir -p artifacts
+          git clone --quiet https://github.com/safal207/ContractGraph-QA.git contractgraph
+          git -C contractgraph checkout --quiet --detach "$CONTRACTGRAPH_COMMIT"
+          test "$(git -C contractgraph rev-parse HEAD)" = "$CONTRACTGRAPH_COMMIT"
+          printf '%s\n' "$CONTRACTGRAPH_COMMIT" > artifacts/contractgraph-source-commit.txt
+
+      - name: Checkout pinned Aegisora runtime subject
+        shell: bash
+        run: |
+          set -euo pipefail
+          git clone --quiet https://github.com/aegisora-ai/aegisora.git durability-subject
+          git -C durability-subject checkout --quiet --detach "$AEGISORA_COMMIT"
+          test "$(git -C durability-subject rev-parse HEAD)" = "$AEGISORA_COMMIT"
+
+      - name: Capture pinned source digests
+        shell: bash
+        run: |
+          set -euo pipefail
+          {
+            printf 'contractgraph_commit=%s\n' "$CONTRACTGRAPH_COMMIT"
+            sha256sum \
+              contractgraph/proofs/execution-receipt-durability-v0.1/run.py \
+              contractgraph/scripts/verify_execution_receipt_durability_001.py \
+              contractgraph/tests/external/aegisora_execution_receipt_durability_001.ts
+            printf 'aegisora_commit=%s\n' "$AEGISORA_COMMIT"
+            for path in \
+              core/packages/runtime/src/enforcement/enforcement-gate.ts \
+              core/packages/runtime/src/enforcement/enterprise-audit-bridge.ts \
+              core/packages/runtime/src/providers/provider-execution-gateway.ts \
+              core/packages/runtime/src/providers/base-provider.ts
+            do
+              digest="$(git -C durability-subject show "$AEGISORA_COMMIT:$path" | sha256sum | awk '{print $1}')"
+              printf '%s  %s\n' "$digest" "$path"
+            done
+          } | tee artifacts/durability-source-digests.txt
+
+      - name: Install pinned Aegisora runtime dependencies
+        shell: bash
+        run: |
+          set -euo pipefail
+          cd durability-subject
+          cp pnpm-lock.yaml "$GITHUB_WORKSPACE/artifacts/aegisora-pnpm-lock-before.yaml"
+          pnpm install --no-frozen-lockfile --filter '@aegisora/runtime...'
+          cp pnpm-lock.yaml "$GITHUB_WORKSPACE/artifacts/aegisora-pnpm-lock-resolved.yaml"
+          git diff -- pnpm-lock.yaml | tee "$GITHUB_WORKSPACE/artifacts/aegisora-pnpm-lock-diff.patch"
+          pnpm --filter '@aegisora/runtime...' build
+
+      - name: Inject pinned durability crash subject
+        shell: bash
+        run: |
+          set -euo pipefail
+          cp \
+            contractgraph/tests/external/aegisora_execution_receipt_durability_001.ts \
+            durability-subject/core/packages/runtime/test/external-execution-receipt-durability-001.ts
+
+      - name: Fresh rerun of ContractGraph-QA process-crash proof
+        shell: bash
+        run: |
+          set -euo pipefail
+          mkdir -p artifacts/source-durability-work
+          python3 contractgraph/proofs/execution-receipt-durability-v0.1/run.py run \
+            --subject-dir durability-subject \
+            --subject-script test/external-execution-receipt-durability-001.ts \
+            --work-dir artifacts/source-durability-work \
+            --write-report artifacts/contractgraph-durability-report.json \
+            | tee artifacts/contractgraph-durability-console.txt
+
+          python3 contractgraph/scripts/verify_execution_receipt_durability_001.py \
+            --report artifacts/contractgraph-durability-report.json \
+            --work-dir artifacts/source-durability-work \
+            --output artifacts/contractgraph-durability-verification.json
+
+      - name: Build canonical durability Evidence Plane envelope
+        shell: bash
+        run: |
+          set -euo pipefail
+          python3 -m py_compile scripts/evidence_plane_durability_001.py
+          python3 scripts/evidence_plane_durability_001.py build \
+            --source-report artifacts/contractgraph-durability-report.json \
+            --fixture "$FIXTURE" \
+            --envelope artifacts/canonical-durability-envelope.json \
+            --xtdb-pending-sql artifacts/xtdb-durability-pending.sql \
+            --xtdb-revision1-sql artifacts/xtdb-durability-revision1.sql \
+            --xtdb-revision2-sql artifacts/xtdb-durability-revision2.sql \
+            --neo4j-load-cypher artifacts/neo4j-durability-load.cypher \
+            --neo4j-verify-cypher artifacts/neo4j-durability-verify.cypher \
+            | tee artifacts/evidence-plane-durability-prepare.json
+
+      - name: Run native LiminalDB durability mapping
+        shell: bash
+        run: |
+          set -euo pipefail
+          cargo test --locked -p liminal-store \
+            --test evidence_plane_durability_fixture -- --nocapture \
+            | tee artifacts/liminaldb-durability-mapping.txt
+          printf 'PASS\n' > artifacts/liminaldb-durability-marker.txt
+
+      - name: Insert durable PENDING knowledge into XTDB
+        shell: bash
+        run: |
+          set -euo pipefail
+          psql -X -v ON_ERROR_STOP=1 -f artifacts/xtdb-durability-pending.sql
+          sleep 1
+
+      - name: Insert first recovery knowledge into XTDB
+        shell: bash
+        run: |
+          set -euo pipefail
+          psql -X -v ON_ERROR_STOP=1 -f artifacts/xtdb-durability-revision1.sql
+          sleep 1
+
+      - name: Insert later FULL readback knowledge into XTDB
+        shell: bash
+        run: |
+          set -euo pipefail
+          psql -X -v ON_ERROR_STOP=1 -f artifacts/xtdb-durability-revision2.sql
+
+      - name: Capture XTDB system-time history
+        shell: bash
+        run: |
+          set -euo pipefail
+          cols='_id, case_id, target, payload_digest, knowledge_state, revision, observation_availability, external_outcome, externally_verified, effect_count, liminal_authority, liminal_execution, liminal_response_integrity, liminal_causal_validity, liminal_continuity_posture, side_effect_committed, source_recovery_decision, source_commit, envelope_sha256, _valid_from, _valid_to, _system_from, _system_to'
+
+          psql -X --csv -v ON_ERROR_STOP=1 \
+            -c "SELECT $cols FROM durability_evidence_plane ORDER BY case_id" \
+            > artifacts/xtdb-durability-current.csv
+
+          psql -X --csv -v ON_ERROR_STOP=1 \
+            -c "SELECT $cols FROM durability_evidence_plane FOR SYSTEM_TIME ALL FOR VALID_TIME ALL ORDER BY case_id, _system_from" \
+            > artifacts/xtdb-durability-history.csv
+
+      - name: Start Neo4j
+        shell: bash
+        run: |
+          set -euo pipefail
+          docker pull "$NEO4J_IMAGE"
+          docker run --detach --name evidence-plane-durability-neo4j \
+            --publish 7474:7474 \
+            --publish 7687:7687 \
+            --env "NEO4J_AUTH=none" \
+            "$NEO4J_IMAGE"
+
+      - name: Wait for Neo4j
+        shell: bash
+        run: |
+          set -euo pipefail
+          for attempt in $(seq 1 90); do
+            if docker exec evidence-plane-durability-neo4j cypher-shell \
+              --format plain "RETURN 1 AS ready;" >/dev/null 2>&1; then
+              echo "Neo4j ready after $attempt attempts"
+              exit 0
+            fi
+            sleep 1
+          done
+          docker logs evidence-plane-durability-neo4j
+          exit 1
+
+      - name: Load and verify Neo4j durability explanation graph
+        shell: bash
+        run: |
+          set -euo pipefail
+          docker exec -i evidence-plane-durability-neo4j cypher-shell \
+            --format plain < artifacts/neo4j-durability-load.cypher \
+            | tee artifacts/neo4j-durability-load.txt
+
+          docker exec -i evidence-plane-durability-neo4j cypher-shell \
+            --format plain < artifacts/neo4j-durability-verify.cypher \
+            | tee artifacts/neo4j-durability-checks.txt
+
+          python3 - <<'PY'
+          from pathlib import Path
+          seen = {}
+          for raw in Path("artifacts/neo4j-durability-checks.txt").read_text().splitlines():
+              line = raw.strip().strip('"')
+              if "CHECK|" not in line:
+                  continue
+              line = line[line.index("CHECK|"):]
+              parts = line.split("|")
+              if len(parts) != 4:
+                  continue
+              name = parts[1]
+              actual = int(parts[2])
+              expected = int(parts[3])
+              if name in seen:
+                  raise SystemExit(f"duplicate Neo4j check: {name}")
+              seen[name] = (actual, expected)
+          if len(seen) < 10:
+              raise SystemExit(f"too few Neo4j checks: {len(seen)}")
+          failures = {
+              name: {"actual": actual, "expected": expected}
+              for name, (actual, expected) in seen.items()
+              if actual != expected
+          }
+          if failures:
+              raise SystemExit("Neo4j durability checks failed: " + repr(failures))
+          print({"neo4j_checks": len(seen), "status": "PASS"})
+          PY
+
+          docker exec evidence-plane-durability-neo4j cypher-shell --format plain \
+            "MATCH (a:Action)-[:HAS_OBSERVATION]->(o:Observation)-[:INFORMS]->(c:Continuity)
+             OPTIONAL MATCH (o)-[:OBSERVES]->(e:Effect)
+             RETURN a.case_id AS case_id, o.revision AS revision,
+                    o.availability AS availability,
+                    o.external_outcome AS external_outcome,
+                    count(e) AS observed_effects,
+                    a.receiver_effect_count AS receiver_effect_count,
+                    c.authority AS authority,
+                    c.posture AS posture,
+                    c.source_recovery_decision AS source_recovery_decision
+             ORDER BY case_id, revision;" \
+            > artifacts/neo4j-durability-explanation.csv
+
+      - name: Verify cross-plane durability invariants
+        shell: bash
+        run: |
+          set -euo pipefail
+          python3 scripts/evidence_plane_durability_001.py verify \
+            --fixture "$FIXTURE" \
+            --envelope artifacts/canonical-durability-envelope.json \
+            --liminal-marker artifacts/liminaldb-durability-marker.txt \
+            --xtdb-current artifacts/xtdb-durability-current.csv \
+            --xtdb-history artifacts/xtdb-durability-history.csv \
+            --neo4j-rows artifacts/neo4j-durability-explanation.csv \
+            --report artifacts/evidence-plane-durability-verification.json
+
+          {
+            sha256sum \
+              artifacts/contractgraph-durability-report.json \
+              artifacts/contractgraph-durability-verification.json \
+              artifacts/canonical-durability-envelope.json \
+              artifacts/evidence-plane-durability-verification.json \
+              artifacts/durability-source-digests.txt \
+              artifacts/aegisora-pnpm-lock-before.yaml \
+              artifacts/aegisora-pnpm-lock-resolved.yaml \
+              artifacts/aegisora-pnpm-lock-diff.patch
+
+            find artifacts/source-durability-work -type f -print0 \
+              | sort -z \
+              | xargs -0 sha256sum
+          } | tee artifacts/evidence-plane-durability-sha256.txt
+
+      - name: Upload EVIDENCE-PLANE-DURABILITY-001 evidence
+        if: always()
+        uses: actions/upload-artifact@v4
+        with:
+          name: evidence-plane-durability-001
+          path: artifacts/
+          if-no-files-found: warn
+          retention-days: 30
+
+      - name: Stop Neo4j
+        if: always()
+        shell: bash
+        run: |
+          docker logs evidence-plane-durability-neo4j > artifacts/neo4j-durability-container.log 2>&1 || true
+          docker rm -f evidence-plane-durability-neo4j || true
