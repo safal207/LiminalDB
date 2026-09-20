@@ -1,0 +1,135 @@
+{
+  "fixture_version": "0.1",
+  "system_case": "CRASHPOINT-LIMINALDB-001",
+  "source": {
+    "repository": "mstevens843/crashpoint",
+    "publication_commit": "bb9cd47c4b0b02527aab7b369d17b32829cc4e20",
+    "manifest_path": "evidence/action_readback/action_readback_self_reviewed_v2/manifest.json",
+    "prediction_path": "evidence/action_readback/action_readback_self_reviewed_v2/prediction.json",
+    "prediction_sha256": "1881868b0cb9b5bcfdd4b034c8bff9c0d5e50c46e6f8cce77f43e9f5aa85496d",
+    "trial_count": 18,
+    "trials_per_case": 3,
+    "scope": "same-host reference fixture; no distributed fencing, host/power-loss durability, CrewAI integration, SafeAgent integration, or exactly-once guarantee"
+  },
+  "mapping_contract": {
+    "rule": "Preserve source evidence classifications; do not infer NO_EFFECT or safe replay from unavailable external readback.",
+    "not_observed_semantics": "NOT_OBSERVED means no verified execution observation is available to this mapping. It is not evidence that no external effect occurred.",
+    "side_effect_false_semantics": "A false LiminalDB projection flag means no positive committed-effect assertion has been durably established in this projection. It is not a negative proof of absence."
+  },
+  "cases": [
+    {
+      "case_id": "clean",
+      "source": {
+        "client_claim": "SUCCESS",
+        "external_outcome": "ONE_EFFECT_MATCHING",
+        "observation_availability": "FULL",
+        "externally_verified": true,
+        "effect_count": 1,
+        "digests_match_admission": true
+      },
+      "liminal": {
+        "observation_records": 1,
+        "execution": "OBSERVED_EXECUTED",
+        "response_integrity": "VERIFIED",
+        "causal_validity": "VALID",
+        "continuity_posture": "REPORT_ONLY",
+        "side_effect_committed": true
+      }
+    },
+    {
+      "case_id": "effect_before_lost_receipt",
+      "source": {
+        "client_claim": "LOST",
+        "external_outcome": "ONE_EFFECT_MATCHING",
+        "observation_availability": "FULL",
+        "externally_verified": true,
+        "effect_count": 1,
+        "digests_match_admission": true
+      },
+      "liminal": {
+        "observation_records": 1,
+        "execution": "OBSERVED_EXECUTED",
+        "response_integrity": "UNKNOWN",
+        "causal_validity": "VALID",
+        "continuity_posture": "REPORT_ONLY",
+        "side_effect_committed": true
+      }
+    },
+    {
+      "case_id": "stopped_before_effect",
+      "source": {
+        "client_claim": "LOST",
+        "external_outcome": "NO_EFFECT",
+        "observation_availability": "FULL",
+        "externally_verified": true,
+        "effect_count": 0,
+        "digests_match_admission": null
+      },
+      "liminal": {
+        "observation_records": 1,
+        "execution": "NOT_OBSERVED",
+        "response_integrity": "NOT_EVALUATED",
+        "causal_validity": "VALID",
+        "continuity_posture": "RETRY_SIDE_EFFECT",
+        "side_effect_committed": false
+      }
+    },
+    {
+      "case_id": "naive_retry",
+      "source": {
+        "client_claim": "SUCCESS",
+        "external_outcome": "MULTIPLE_EFFECTS_MATCHING",
+        "observation_availability": "FULL",
+        "externally_verified": true,
+        "effect_count": 2,
+        "digests_match_admission": true
+      },
+      "liminal": {
+        "observation_records": 2,
+        "execution": "OBSERVED_EXECUTED",
+        "response_integrity": "PARTIAL",
+        "causal_validity": "VALID",
+        "continuity_posture": "BLOCKED",
+        "side_effect_committed": true
+      }
+    },
+    {
+      "case_id": "payload_mismatch",
+      "source": {
+        "client_claim": "SUCCESS",
+        "external_outcome": "ONE_EFFECT_MISMATCHED",
+        "observation_availability": "FULL",
+        "externally_verified": true,
+        "effect_count": 1,
+        "digests_match_admission": false
+      },
+      "liminal": {
+        "observation_records": 1,
+        "execution": "OBSERVED_EXECUTED",
+        "response_integrity": "FAILED",
+        "causal_validity": "INVALID",
+        "continuity_posture": "BLOCKED",
+        "side_effect_committed": true
+      }
+    },
+    {
+      "case_id": "unavailable_readback",
+      "source": {
+        "client_claim": "SUCCESS",
+        "external_outcome": "INDETERMINATE",
+        "observation_availability": "UNAVAILABLE",
+        "externally_verified": false,
+        "effect_count": null,
+        "digests_match_admission": null
+      },
+      "liminal": {
+        "observation_records": 1,
+        "execution": "NOT_OBSERVED",
+        "response_integrity": "UNKNOWN",
+        "causal_validity": "NOT_EVALUATED",
+        "continuity_posture": "REVALIDATE",
+        "side_effect_committed": null
+      }
+    }
+  ]
+}
