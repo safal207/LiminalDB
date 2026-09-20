@@ -4,6 +4,7 @@ on:
   workflow_dispatch:
   pull_request:
     branches:
+      - main
       - feat/crashpoint-liminaldb-001
     paths:
       - "scripts/xtdb_liminaldb_001.py"
