@@ -29,12 +29,12 @@ def sql_text(value: str) -> str:
 
 def sql_bool(value: bool | None) -> str:
     if value is None:
-        return "NULL"
+        return "CAST(NULL AS BOOLEAN)"
     return "TRUE" if value else "FALSE"
 
 
 def sql_int(value: int | None) -> str:
-    return "NULL" if value is None else str(value)
+    return "CAST(NULL AS BIGINT)" if value is None else str(value)
 
 
 def sql_timestamp(value: str) -> str:
