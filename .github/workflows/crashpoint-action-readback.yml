@@ -1,0 +1,85 @@
+name: Crashpoint Action Readback Mapping
+
+on:
+  workflow_dispatch:
+  pull_request:
+    branches: [main]
+    paths:
+      - "liminal-db/crates/liminal-store/tests/crashpoint_action_readback_fixture.rs"
+      - "liminal-db/crates/liminal-store/tests/fixtures/crashpoint_action_readback_v0.1.json"
+      - "scripts/validate_crashpoint_action_readback_fixture.py"
+      - "docs/integrations/CRASHPOINT_ACTION_READBACK_V0_1.md"
+      - ".github/workflows/crashpoint-action-readback.yml"
+
+permissions:
+  contents: read
+
+env:
+  CRASHPOINT_COMMIT: bb9cd47c4b0b02527aab7b369d17b32829cc4e20
+  CRASHPOINT_BUNDLE: evidence/action_readback/action_readback_self_reviewed_v2
+  FIXTURE: liminal-db/crates/liminal-store/tests/fixtures/crashpoint_action_readback_v0.1.json
+
+jobs:
+  verify:
+    runs-on: ubuntu-latest
+    timeout-minutes: 20
+
+    steps:
+      - name: Checkout exact PR head
+        uses: actions/checkout@v6
+        with:
+          persist-credentials: false
+
+      - name: Set up Rust
+        uses: dtolnay/rust-toolchain@stable
+        with:
+          components: rustfmt
+
+      - name: Fetch pinned Crashpoint evidence metadata
+        shell: bash
+        run: |
+          set -euo pipefail
+          mkdir -p artifacts
+          base="https://raw.githubusercontent.com/mstevens843/crashpoint/${CRASHPOINT_COMMIT}/${CRASHPOINT_BUNDLE}"
+          curl --fail --silent --show-error --location --retry 3 \
+            "$base/manifest.json" \
+            -o artifacts/crashpoint-manifest.json
+          curl --fail --silent --show-error --location --retry 3 \
+            "$base/prediction.json" \
+            -o artifacts/crashpoint-prediction.json
+          cp "$FIXTURE" artifacts/liminaldb-mapping-fixture.json
+
+      - name: Verify pinned source facts against local fixture
+        shell: bash
+        run: |
+          set -euo pipefail
+          python3 scripts/validate_crashpoint_action_readback_fixture.py \
+            --fixture "$FIXTURE" \
+            --manifest artifacts/crashpoint-manifest.json \
+            --prediction artifacts/crashpoint-prediction.json \
+            | tee artifacts/source-mapping-verification.json
+
+      - name: Verify formatting
+        run: cargo fmt --all --check
+
+      - name: Map all six cases through LiminalDB and replay
+        shell: bash
+        run: |
+          set -euo pipefail
+          cargo test --locked -p liminal-store \
+            --test crashpoint_action_readback_fixture -- --nocapture \
+            | tee artifacts/liminaldb-mapping-test.txt
+
+      - name: Upload bounded evidence pack
+        if: always()
+        uses: actions/upload-artifact@v4
+        with:
+          name: crashpoint-liminaldb-001
+          path: |
+            artifacts/crashpoint-manifest.json
+            artifacts/crashpoint-prediction.json
+            artifacts/liminaldb-mapping-fixture.json
+            artifacts/source-mapping-verification.json
+            artifacts/liminaldb-mapping-test.txt
+          if-no-files-found: warn
+          retention-days: 30
