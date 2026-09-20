@@ -1,0 +1,114 @@
+{
+  "fixture_version": "0.1",
+  "system_case": "EVIDENCE-PLANE-DURABILITY-001",
+  "source": {
+    "repository": "safal207/ContractGraph-QA",
+    "commit": "aef57d1059513b0de1c7cc5945777949175b44de",
+    "proof_system_case": "EXECUTION-RECEIPT-DURABILITY-001",
+    "proof_path": "proofs/execution-receipt-durability-v0.1/run.py",
+    "runtime_subject_repository": "aegisora-ai/aegisora",
+    "runtime_subject_commit": "2bac618215671f6f0ac8ebddf169830d4fc0f9b3",
+    "case_count": 3
+  },
+  "mapping_contract": {
+    "authority_rule": "A consumed pre-crash execution authority is never restored by PENDING or recovery. NO_EFFECT requires fresh authorization; unavailable readback requires revalidation.",
+    "effect_rule": "FULL+ONE_EFFECT_MATCHING may finalize the existing action without redispatch; UNAVAILABLE never becomes NO_EFFECT.",
+    "projection_rule": "LiminalDB owns continuity semantics; XTDB owns knowledge-version history; Neo4j is an explanation/provenance read model.",
+    "claim_ceiling": "Same-host SQLite process-crash evidence only; no host-power-loss, distributed consensus, production-provider, recipient, or settlement claim."
+  },
+  "cases": [
+    {
+      "case_id": "effect_then_crash",
+      "expected_attempt_count": 1,
+      "expected_effect_count": 1,
+      "revisions": [
+        {
+          "revision": 1,
+          "source": {
+            "observation_availability": "FULL",
+            "external_outcome": "ONE_EFFECT_MATCHING",
+            "externally_verified": true,
+            "effect_count": 1,
+            "recovery_decision": "FINALIZE_EXISTING_NO_REDISPATCH"
+          },
+          "liminal": {
+            "authority": "CONSUMED",
+            "execution": "OBSERVED_EXECUTED",
+            "response_integrity": "VERIFIED",
+            "causal_validity": "VALID",
+            "continuity_posture": "REPORT_ONLY",
+            "side_effect_committed": true
+          }
+        }
+      ]
+    },
+    {
+      "case_id": "crash_before_effect",
+      "expected_attempt_count": 1,
+      "expected_effect_count": 0,
+      "revisions": [
+        {
+          "revision": 1,
+          "source": {
+            "observation_availability": "FULL",
+            "external_outcome": "NO_EFFECT",
+            "externally_verified": true,
+            "effect_count": 0,
+            "recovery_decision": "NO_REDISPATCH_FRESH_AUTHORIZATION_REQUIRED"
+          },
+          "liminal": {
+            "authority": "REVALIDATION_REQUIRED",
+            "execution": "NOT_OBSERVED",
+            "response_integrity": "NOT_EVALUATED",
+            "causal_validity": "VALID",
+            "continuity_posture": "REVALIDATE",
+            "side_effect_committed": false
+          }
+        }
+      ]
+    },
+    {
+      "case_id": "unavailable_readback",
+      "expected_attempt_count": 1,
+      "expected_effect_count": 1,
+      "revisions": [
+        {
+          "revision": 1,
+          "source": {
+            "observation_availability": "UNAVAILABLE",
+            "external_outcome": "INDETERMINATE",
+            "externally_verified": false,
+            "effect_count": null,
+            "recovery_decision": "HOLD_REVALIDATE_NO_REDISPATCH"
+          },
+          "liminal": {
+            "authority": "REVALIDATION_REQUIRED",
+            "execution": "NOT_OBSERVED",
+            "response_integrity": "UNKNOWN",
+            "causal_validity": "NOT_EVALUATED",
+            "continuity_posture": "REVALIDATE",
+            "side_effect_committed": null
+          }
+        },
+        {
+          "revision": 2,
+          "source": {
+            "observation_availability": "FULL",
+            "external_outcome": "ONE_EFFECT_MATCHING",
+            "externally_verified": true,
+            "effect_count": 1,
+            "recovery_decision": "FINALIZE_EXISTING_NO_REDISPATCH"
+          },
+          "liminal": {
+            "authority": "CONSUMED",
+            "execution": "OBSERVED_EXECUTED",
+            "response_integrity": "VERIFIED",
+            "causal_validity": "VALID",
+            "continuity_posture": "REPORT_ONLY",
+            "side_effect_committed": true
+          }
+        }
+      ]
+    }
+  ]
+}
