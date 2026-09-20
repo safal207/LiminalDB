@@ -713,7 +713,7 @@ def build(args: argparse.Namespace) -> None:
 
 def read_csv(path: Path) -> list[dict[str, str]]:
     with path.open(newline="", encoding="utf-8") as handle:
-        return list(csv.DictReader(handle))
+        return list(csv.DictReader(handle, skipinitialspace=True))
 
 
 def parse_bool(value: str) -> bool | None:
