@@ -98,75 +98,103 @@ The source verifier independently reopens all three SQLite databases and checks 
 
 ## Live XTDB ingestion
 
-This is not an offline reconstruction.
+This is not an offline reconstruction, and XTDB is not allowed to learn the receiver effect early.
 
-The workflow interleaves source events and XTDB transactions:
+The table contains two semantic record types:
 
-\`\`\`text
-T1 effect exists
+```text
+STATE
+  what the system currently knows / may conclude about the action
+
+EFFECT
+  an externally verified receiver fact
+```
+
+The STATE row is anchored at the admitted action's T0 valid-time and receives live system-time revisions.
+
+The EFFECT row does **not exist at all** before T4.
+
+Workflow order:
+
+```text
+T1 receiver effect exists in receiver authority only
+
 T2 SUCCESS claim
     ↓
-XTDB insert CLAIM_ONLY
-    ↓
+XTDB STATE = CLAIM_ONLY
 capture system-time S2
 
 T3 observer says UNAVAILABLE
     ↓
-XTDB insert READBACK_UNAVAILABLE
-    ↓
+XTDB STATE = READBACK_UNAVAILABLE
 capture system-time S3
-    ↓
-query valid-time T1 as-of S3
-    => INDETERMINATE / REVALIDATE
 
-only after that query:
+at S3:
+  STATE AS OF S3
+    = INDETERMINATE / REVALIDATE
 
+  EFFECT valid at T1 AS OF S3
+    = 0 rows
+```
+
+Only after those T3 witnesses are frozen:
+
+```text
 T4 observer obtains FULL readback
     ↓
-XTDB insert READBACK_FULL
-    ↓
+XTDB STATE = READBACK_FULL
+    +
+XTDB EFFECT fact inserted for the first time
+    valid-time = receiver commit time T1
 capture system-time S4
-\`\`\`
+```
 
-After S4, the workflow queries T1 **again AS OF S3**.
+At S4:
 
-Required:
+```text
+STATE AS OF S4
+  = ONE_EFFECT_MATCHING / REPORT_ONLY
 
-\`\`\`text
-valid-time T1 + system-time S3
-  = READBACK_UNAVAILABLE / INDETERMINATE / REVALIDATE
-\`\`\`
+EFFECT valid at T1 AS OF S4
+  = 1 verified effect fact
+```
 
-even though the current XTDB row is now:
+Then the workflow asks the historical question again **after T4 has already been inserted**:
 
-\`\`\`text
-valid-time T1 + system-time S4
-  = READBACK_FULL / ONE_EFFECT_MATCHING / REPORT_ONLY
-\`\`\`
+```text
+STATE AS OF S3
+  = still READBACK_UNAVAILABLE / INDETERMINATE / REVALIDATE
 
-This is the core bitemporal statement:
+EFFECT valid at T1 AS OF S3
+  = still 0 rows
+```
 
-> Later evidence can change what the system currently knows about T1 without rewriting what the system knew before that evidence arrived.
+This is the core bitemporal proof:
+
+> the effect was valid in receiver authority at T1, but the knowledge store did not contain that fact at S3; T4 introduces the fact retroactively with valid-time T1 without rewriting the earlier system-time view.
 
 ## Execution-order acceptance
 
 The workflow order is itself part of the proof and must not be rearranged:
 
 ```text
-insert T3 UNAVAILABLE
+insert T3 UNAVAILABLE STATE
 capture XTDB system-time S3
-query valid-time T1 AS OF S3
-assert INDETERMINATE / REVALIDATE
+assert STATE = INDETERMINATE / REVALIDATE
+assert EFFECT(valid-time T1) = absent
 
 only then:
 
 perform source T4 FULL readback
-insert T4 FULL knowledge
-re-query valid-time T1 AS OF S3
-assert the earlier state is still unchanged
+insert T4 FULL STATE
+insert EFFECT fact with valid-time T1
+
+then re-query AS OF S3:
+assert old STATE unchanged
+assert EFFECT(valid-time T1) still absent at S3
 ```
 
-A run that performs T4 before freezing the T3 witness does not satisfy KNOWLEDGE-LAG-001.
+A run that reads the receiver or inserts the EFFECT fact before the T3 witnesses are frozen does not satisfy KNOWLEDGE-LAG-001.
 
 ## Important clock distinction
 
