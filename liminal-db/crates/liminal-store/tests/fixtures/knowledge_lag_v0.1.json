@@ -1,0 +1,85 @@
+{
+  "fixture_version": "0.1",
+  "system_case": "KNOWLEDGE-LAG-001",
+  "source_case": "retroactive_readback",
+  "timeline_contract": {
+    "T0": "action_id and payload/target are admitted before dispatch",
+    "T0D": "dispatch begins after admission",
+    "T1": "receiver authority commits one matching external effect",
+    "T2": "runtime records client claim SUCCESS",
+    "T3": "observer readback is UNAVAILABLE and must remain INDETERMINATE",
+    "T4": "observer obtains FULL readback of the T1 effect"
+  },
+  "source_authorities": {
+    "admission_control": "SQLite admission/control ledger",
+    "consequence": "separate SQLite receiver ledger",
+    "observation": "separate SQLite observer ledger"
+  },
+  "expected": {
+    "attempt_count": 1,
+    "effect_count": 1,
+    "client_claim": "SUCCESS",
+    "revisions": [
+      {
+        "knowledge_state": "CLAIM_ONLY",
+        "source": {
+          "observation_availability": "NOT_READ_BACK",
+          "external_outcome": "INDETERMINATE",
+          "externally_verified": false,
+          "effect_count": null
+        },
+        "liminal": {
+          "authority": "CONSUMED",
+          "execution": "NOT_OBSERVED",
+          "response_integrity": "UNKNOWN",
+          "causal_validity": "NOT_EVALUATED",
+          "continuity_posture": "REVALIDATE",
+          "side_effect_committed": null
+        }
+      },
+      {
+        "knowledge_state": "READBACK_UNAVAILABLE",
+        "source": {
+          "observation_availability": "UNAVAILABLE",
+          "external_outcome": "INDETERMINATE",
+          "externally_verified": false,
+          "effect_count": null
+        },
+        "liminal": {
+          "authority": "CONSUMED",
+          "execution": "NOT_OBSERVED",
+          "response_integrity": "UNKNOWN",
+          "causal_validity": "NOT_EVALUATED",
+          "continuity_posture": "REVALIDATE",
+          "side_effect_committed": null
+        }
+      },
+      {
+        "knowledge_state": "READBACK_FULL",
+        "source": {
+          "observation_availability": "FULL",
+          "external_outcome": "ONE_EFFECT_MATCHING",
+          "externally_verified": true,
+          "effect_count": 1
+        },
+        "liminal": {
+          "authority": "CONSUMED",
+          "execution": "OBSERVED_EXECUTED",
+          "response_integrity": "VERIFIED",
+          "causal_validity": "VALID",
+          "continuity_posture": "REPORT_ONLY",
+          "side_effect_committed": true
+        }
+      }
+    ]
+  },
+  "invariants": [
+    "effect_committed_at_utc is assigned by the receiver authority, not XTDB",
+    "T0 < T0D < T1 < T2 < T3 < T4",
+    "T3 cannot use hidden receiver truth and stays INDETERMINATE/REVALIDATE",
+    "T4 may introduce knowledge about the same effect whose valid time is T1",
+    "later evidence must not rewrite what was knowable at the earlier XTDB system time",
+    "Neo4j may retain the Effect node while the T3 Observation has zero OBSERVES edges"
+  ],
+  "claim_ceiling": "Bounded same-host local fixture with independent SQLite authority domains; no production provider, distributed clock, Byzantine storage, recipient, payment, or settlement claim."
+}
