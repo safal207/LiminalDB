@@ -1006,24 +1006,51 @@ def verify(args: argparse.Namespace) -> None:
     witness_unavailable = read_csv(Path(args.witness_unavailable))
     witness_unavailable_after = read_csv(Path(args.witness_unavailable_after))
     witness_full = read_csv(Path(args.witness_full))
+    effect_before = read_csv(Path(args.effect_before))
+    effect_before_after = read_csv(Path(args.effect_before_after))
+    effect_full = read_csv(Path(args.effect_full))
     neo = read_csv(Path(args.neo4j_rows))
 
-    if len(current) != 1 or len(history) != 3:
+    if len(current) != 2 or len(history) != 4:
         fail(f"XTDB current/history row count drift: {len(current)}/{len(history)}")
 
-    history.sort(key=lambda row: row["_system_from"])
+    state_history = [row for row in history if row["record_type"] == "STATE"]
+    effect_history = [row for row in history if row["record_type"] == "EFFECT"]
+    if len(state_history) != 3 or len(effect_history) != 1:
+        fail(
+            f"XTDB state/effect history count drift: "
+            f"{len(state_history)}/{len(effect_history)}"
+        )
+
+    state_history.sort(key=lambda row: row["_system_from"])
     expected_states = ["CLAIM_ONLY", "READBACK_UNAVAILABLE", "READBACK_FULL"]
-    actual_states = [row["knowledge_state"] for row in history]
+    actual_states = [row["knowledge_state"] for row in state_history]
     if actual_states != expected_states:
         fail(f"XTDB knowledge sequence drift: {actual_states}")
 
-    valid_times = {row["_valid_from"] for row in history}
-    if len(valid_times) != 1:
-        fail("XTDB revisions do not share one effect valid-time")
-    source_valid = parse_ts(envelope["timeline"]["T1_effect_committed"]["utc"])
-    xtdb_valid = parse_ts(next(iter(valid_times)))
-    if source_valid != xtdb_valid:
-        fail(f"XTDB valid-time {xtdb_valid} != receiver effect time {source_valid}")
+    state_valid_times = {row["_valid_from"] for row in state_history}
+    if len(state_valid_times) != 1:
+        fail("XTDB STATE revisions do not share one admission valid-time")
+    source_admission = parse_ts(envelope["timeline"]["T0_admitted"]["utc"])
+    xtdb_state_valid = parse_ts(next(iter(state_valid_times)))
+    if source_admission != xtdb_state_valid:
+        fail(
+            f"XTDB STATE valid-time {xtdb_state_valid} "
+            f"!= source admission time {source_admission}"
+        )
+
+    effect_row = effect_history[0]
+    if effect_row["knowledge_state"] != "EFFECT_FACT":
+        fail("XTDB effect row is not EFFECT_FACT")
+    source_effect_valid = parse_ts(envelope["timeline"]["T1_effect_committed"]["utc"])
+    xtdb_effect_valid = parse_ts(effect_row["_valid_from"])
+    if source_effect_valid != xtdb_effect_valid:
+        fail(
+            f"XTDB EFFECT valid-time {xtdb_effect_valid} "
+            f"!= receiver effect time {source_effect_valid}"
+        )
+    if effect_row["effect_id"] != envelope["effect"]["effect_id"]:
+        fail("XTDB EFFECT fact id drift")
 
     for rows, expected_state, expected_outcome in (
         (witness_claim, "CLAIM_ONLY", "INDETERMINATE"),
@@ -1032,22 +1059,50 @@ def verify(args: argparse.Namespace) -> None:
         (witness_full, "READBACK_FULL", "ONE_EFFECT_MATCHING"),
     ):
         if len(rows) != 1:
-            fail(f"witness {expected_state} expected one row, got {len(rows)}")
+            fail(f"STATE witness {expected_state} expected one row, got {len(rows)}")
         row = rows[0]
-        if row["knowledge_state"] != expected_state or row["external_outcome"] != expected_outcome:
-            fail(f"witness drift: expected {expected_state}/{expected_outcome}, got {row['knowledge_state']}/{row['external_outcome']}")
+        if (
+            row["record_type"] != "STATE"
+            or row["knowledge_state"] != expected_state
+            or row["external_outcome"] != expected_outcome
+        ):
+            fail(
+                f"STATE witness drift: expected {expected_state}/{expected_outcome}, "
+                f"got {row.get('record_type')}/{row.get('knowledge_state')}/"
+                f"{row.get('external_outcome')}"
+            )
+
+    if effect_before:
+        fail("T3 system-time unexpectedly contains retroactive EFFECT fact before T4")
+    if effect_before_after:
+        fail("T4 insertion rewrote T3 system-time with retroactive EFFECT fact")
+    if len(effect_full) != 1:
+        fail(f"T4 system-time expected one EFFECT fact, got {len(effect_full)}")
+    effect_witness = effect_full[0]
+    if (
+        effect_witness["record_type"] != "EFFECT"
+        or effect_witness["effect_id"] != envelope["effect"]["effect_id"]
+        or effect_witness["knowledge_state"] != "EFFECT_FACT"
+    ):
+        fail("T4 effect witness identity drift")
+    if parse_ts(effect_witness["_valid_from"]) != source_effect_valid:
+        fail("T4 retroactive effect witness valid-time drift")
 
     if witness_unavailable_after[0]["_system_from"] != witness_unavailable[0]["_system_from"]:
-        fail("later insertion rewrote the earlier UNAVAILABLE system-time version")
+        fail("later insertion rewrote the earlier UNAVAILABLE STATE version")
 
     if witness_unavailable[0]["liminal_continuity_posture"] != "REVALIDATE":
         fail("UNAVAILABLE witness escaped REVALIDATE")
     if witness_full[0]["liminal_continuity_posture"] != "REPORT_ONLY":
         fail("FULL witness did not reach REPORT_ONLY")
 
-    system_times = [parse_ts(row["_system_from"]) for row in history]
-    if not (system_times[0] < system_times[1] < system_times[2]):
-        fail("XTDB system-time versions are not strictly increasing")
+    state_system_times = [parse_ts(row["_system_from"]) for row in state_history]
+    if not (
+        state_system_times[0] < state_system_times[1] < state_system_times[2]
+    ):
+        fail("XTDB STATE system-time versions are not strictly increasing")
+    if parse_ts(effect_row["_system_from"]) != state_system_times[2]:
+        fail("EFFECT fact was not learned in the same XTDB transaction as T4 FULL state")
 
     source_times = [
         parse_ts(envelope["timeline"]["T0_admitted"]["utc"]),
@@ -1060,7 +1115,7 @@ def verify(args: argparse.Namespace) -> None:
     if source_times != sorted(source_times) or len(set(source_times)) != len(source_times):
         fail("source event times are not strictly ordered")
 
-    # Neo4j explanation rows: T3 hidden effect and T4 visible effect.
+    # Neo4j explanation rows: receiver truth exists, but T3 cannot observe it.
     if len(neo) != 2:
         fail(f"Neo4j explanation rows={len(neo)}, expected 2")
     by_availability = {row["availability"]: row for row in neo}
@@ -1068,13 +1123,22 @@ def verify(args: argparse.Namespace) -> None:
     full = by_availability.get("FULL")
     if unavailable is None or full is None:
         fail("Neo4j missing UNAVAILABLE/FULL observations")
-    if int(unavailable["receiver_effect_count"]) != 1 or int(unavailable["observed_effects"]) != 0:
+    if (
+        int(unavailable["receiver_effect_count"]) != 1
+        or int(unavailable["observed_effects"]) != 0
+    ):
         fail("Neo4j hidden-effect boundary failed at T3")
-    if unavailable["posture"] != "REVALIDATE" or unavailable["external_outcome"] != "INDETERMINATE":
+    if (
+        unavailable["posture"] != "REVALIDATE"
+        or unavailable["external_outcome"] != "INDETERMINATE"
+    ):
         fail("Neo4j T3 conclusion drift")
     if int(full["receiver_effect_count"]) != 1 or int(full["observed_effects"]) != 1:
         fail("Neo4j T4 observation did not bind effect")
-    if full["posture"] != "REPORT_ONLY" or full["external_outcome"] != "ONE_EFFECT_MATCHING":
+    if (
+        full["posture"] != "REPORT_ONLY"
+        or full["external_outcome"] != "ONE_EFFECT_MATCHING"
+    ):
         fail("Neo4j T4 conclusion drift")
 
     liminal_marker = Path(args.liminal_marker).read_text(encoding="utf-8").strip()
@@ -1085,33 +1149,36 @@ def verify(args: argparse.Namespace) -> None:
         "system_case": SYSTEM_CASE,
         "status": "PASS",
         "envelope_sha256": envelope["envelope_sha256"],
-        "source_valid_time": envelope["timeline"]["T1_effect_committed"]["utc"],
+        "source_effect_valid_time": envelope["timeline"]["T1_effect_committed"]["utc"],
         "source_observation_times": {
             "claim": envelope["timeline"]["T2_claim_success"]["utc"],
             "unavailable": envelope["timeline"]["T3_readback_unavailable"]["utc"],
             "full": envelope["timeline"]["T4_readback_full"]["utc"],
         },
         "xtdb": {
-            "history_rows": 3,
+            "history_rows": 4,
+            "state_versions": 3,
+            "effect_fact_versions": 1,
             "knowledge_sequence": expected_states,
-            "earlier_unavailable_version_preserved_after_full_insert": True,
-            "valid_time_equals_receiver_effect_time": True,
+            "effect_fact_absent_as_of_T3_before_T4": True,
+            "effect_fact_still_absent_as_of_T3_after_T4": True,
+            "effect_fact_visible_as_of_T4_with_valid_time_T1": True,
+            "earlier_unavailable_state_preserved_after_full_insert": True,
         },
         "liminaldb": "PASS",
         "neo4j": {
-            "receiver_effect_exists_at_T3": True,
+            "receiver_effect_exists": True,
             "T3_observes_effect": False,
             "T3_posture": "REVALIDATE",
             "T4_observes_effect": True,
             "T4_posture": "REPORT_ONLY",
         },
         "core_result":
-            "What happened at T1 and what the system knew before T4 are independently queryable. Later evidence changes the current conclusion without rewriting the earlier knowable state.",
+            "The T1 effect fact is absent from XTDB knowledge as of T3 and is only introduced at T4 with retroactive valid-time T1. Later evidence changes current knowledge without rewriting the earlier system-time state.",
         "claim_ceiling": envelope["claim_ceiling"],
     }
     write_json(Path(args.report), result)
     print(json.dumps(result, indent=2, sort_keys=True))
-
 
 def parser() -> argparse.ArgumentParser:
     root = argparse.ArgumentParser()
@@ -1162,6 +1229,9 @@ def parser() -> argparse.ArgumentParser:
     p.add_argument("--witness-unavailable", required=True)
     p.add_argument("--witness-unavailable-after", required=True)
     p.add_argument("--witness-full", required=True)
+    p.add_argument("--effect-before", required=True)
+    p.add_argument("--effect-before-after", required=True)
+    p.add_argument("--effect-full", required=True)
     p.add_argument("--neo4j-rows", required=True)
     p.add_argument("--liminal-marker", required=True)
     p.add_argument("--report", required=True)
