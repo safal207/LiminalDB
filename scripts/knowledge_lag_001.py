@@ -626,12 +626,15 @@ def sql_timestamp(value: str) -> str:
 
 XTDB_COLUMNS = [
     "_id",
+    "record_type",
+    "action_id",
     "case_id",
     "target",
     "payload_digest",
     "knowledge_state",
     "source_event_time",
     "effect_committed_at",
+    "effect_id",
     "client_claim",
     "observation_availability",
     "external_outcome",
@@ -647,19 +650,44 @@ XTDB_COLUMNS = [
 ]
 
 
+def sql_nullable_text(value: str | None) -> str:
+    return "CAST(NULL AS TEXT)" if value is None else sql_text(value)
+
+
 def emit_xtdb(args: argparse.Namespace) -> None:
     fixture = load_fixture(Path(args.fixture))
-    state = load_state(Path(args.control), Path(args.receiver), Path(args.observer))
-    if len(state["effects"]) != 1:
-        fail("XTDB phase requires receiver effect to exist")
-    effect = state["effects"][0]
-    claim = state["claim"]
-    observations = state["observations"]
+    control = Path(args.control)
+    observer = Path(args.observer)
+
+    with connect(control, readonly=True) as conn:
+        admission_row = conn.execute(
+            "select * from admissions where action_id=?", (ACTION_ID,)
+        ).fetchone()
+        claim_row = conn.execute(
+            "select * from claims where action_id=? order by seq desc limit 1",
+            (ACTION_ID,),
+        ).fetchone()
+
+    if admission_row is None or claim_row is None:
+        fail("XTDB phase requires admission and SUCCESS claim")
+    admission = dict(admission_row)
+    claim = dict(claim_row)
+    if admission["target"] != TARGET or admission["payload_digest"] != PAYLOAD_DIGEST:
+        fail("XTDB phase admission identity drift")
+    if claim["claim"] != "SUCCESS":
+        fail("XTDB phase requires SUCCESS claim")
+
+    with connect(observer, readonly=True) as conn:
+        observations = [
+            dict(row)
+            for row in conn.execute(
+                "select * from observations where action_id=? order by revision",
+                (ACTION_ID,),
+            ).fetchall()
+        ]
 
     phase = args.phase
     if phase == "claim":
-        if claim is None:
-            fail("claim XTDB phase requires source claim")
         knowledge_state = "CLAIM_ONLY"
         source_event_time = claim["claimed_at_utc"]
         source = revision_from_fixture(fixture, knowledge_state)["source"]
@@ -668,8 +696,13 @@ def emit_xtdb(args: argparse.Namespace) -> None:
         if len(observations) < 1:
             fail("unavailable XTDB phase requires first observer record")
         obs = observations[0]
-        if obs["availability"] != "UNAVAILABLE":
-            fail("first observer record is not UNAVAILABLE")
+        if (
+            obs["availability"] != "UNAVAILABLE"
+            or obs["external_outcome"] != "INDETERMINATE"
+            or obs["effect_count"] is not None
+            or obs["observed_effect_id"] is not None
+        ):
+            fail("T3 observer record leaked receiver truth")
         knowledge_state = "READBACK_UNAVAILABLE"
         source_event_time = obs["observed_at_utc"]
         source = revision_from_fixture(fixture, knowledge_state)["source"]
@@ -678,8 +711,14 @@ def emit_xtdb(args: argparse.Namespace) -> None:
         if len(observations) < 2:
             fail("full XTDB phase requires second observer record")
         obs = observations[1]
-        if obs["availability"] != "FULL":
-            fail("second observer record is not FULL")
+        if (
+            obs["availability"] != "FULL"
+            or obs["external_outcome"] != "ONE_EFFECT_MATCHING"
+            or int(obs["effect_count"]) != 1
+            or obs["observed_effect_id"] != EFFECT_ID
+            or obs["observed_effect_committed_at_utc"] is None
+        ):
+            fail("T4 observer record does not bind one matching effect")
         knowledge_state = "READBACK_FULL"
         source_event_time = obs["observed_at_utc"]
         source = revision_from_fixture(fixture, knowledge_state)["source"]
@@ -687,14 +726,17 @@ def emit_xtdb(args: argparse.Namespace) -> None:
     else:
         fail(f"unsupported XTDB phase {phase}")
 
-    values = [
+    state_values = [
+        sql_text(ACTION_ID),
+        sql_text("STATE"),
         sql_text(ACTION_ID),
         sql_text("retroactive_readback"),
         sql_text(TARGET),
         sql_text(PAYLOAD_DIGEST),
         sql_text(knowledge_state),
         sql_timestamp(source_event_time),
-        sql_timestamp(effect["committed_at_utc"]),
+        "CAST(NULL AS TIMESTAMP)",
+        "CAST(NULL AS TEXT)",
         sql_text("SUCCESS"),
         sql_text(source["observation_availability"]),
         sql_text(source["external_outcome"]),
@@ -706,16 +748,64 @@ def emit_xtdb(args: argparse.Namespace) -> None:
         sql_text(liminal["causal_validity"]),
         sql_text(liminal["continuity_posture"]),
         sql_bool(liminal["side_effect_committed"]),
-        sql_timestamp(effect["committed_at_utc"]),
+        sql_timestamp(admission["admitted_at_utc"]),
     ]
+
+    rows = ["(" + ", ".join(state_values) + ")"]
+
+    # The effect fact is deliberately absent until T4 FULL readback.
+    # It is then inserted retroactively with receiver-valid time T1.
+    if phase == "full":
+        full = observations[1]
+        effect_values = [
+            sql_text(EFFECT_ID),
+            sql_text("EFFECT"),
+            sql_text(ACTION_ID),
+            sql_text("retroactive_readback"),
+            sql_text(TARGET),
+            sql_text(PAYLOAD_DIGEST),
+            sql_text("EFFECT_FACT"),
+            sql_timestamp(full["observed_at_utc"]),
+            sql_timestamp(full["observed_effect_committed_at_utc"]),
+            sql_text(EFFECT_ID),
+            sql_text("SUCCESS"),
+            sql_text("FULL"),
+            sql_text("ONE_EFFECT_MATCHING"),
+            sql_bool(True),
+            sql_int(1),
+            "CAST(NULL AS TEXT)",
+            "CAST(NULL AS TEXT)",
+            "CAST(NULL AS TEXT)",
+            "CAST(NULL AS TEXT)",
+            "CAST(NULL AS TEXT)",
+            "CAST(NULL AS BOOLEAN)",
+            sql_timestamp(full["observed_effect_committed_at_utc"]),
+        ]
+        rows.append("(" + ", ".join(effect_values) + ")")
+
     sql = (
-        f"INSERT INTO {XTDB_TABLE} (" + ", ".join(XTDB_COLUMNS) + ") VALUES\n  ("
-        + ", ".join(values)
-        + ");\n"
+        f"INSERT INTO {XTDB_TABLE} (" + ", ".join(XTDB_COLUMNS) + ") VALUES\n  "
+        + ",\n  ".join(rows)
+        + ";\n"
     )
     Path(args.output).write_text(sql, encoding="utf-8")
-    print(json.dumps({"phase": phase, "knowledge_state": knowledge_state, "valid_time": effect["committed_at_utc"], "source_event_time": source_event_time}, indent=2))
-
+    print(
+        json.dumps(
+            {
+                "phase": phase,
+                "knowledge_state": knowledge_state,
+                "state_valid_time": admission["admitted_at_utc"],
+                "effect_fact_inserted": phase == "full",
+                "effect_valid_time": (
+                    observations[1]["observed_effect_committed_at_utc"]
+                    if phase == "full"
+                    else None
+                ),
+                "source_event_time": source_event_time,
+            },
+            indent=2,
+        )
+    )
 
 def cypher_string(value: str) -> str:
     return "'" + value.replace("\\", "\\\\").replace("'", "\\'") + "'"
@@ -1051,7 +1141,6 @@ def parser() -> argparse.ArgumentParser:
     p = sub.add_parser("xtdb-phase")
     p.add_argument("--phase", choices=("claim", "unavailable", "full"), required=True)
     p.add_argument("--control", required=True)
-    p.add_argument("--receiver", required=True)
     p.add_argument("--observer", required=True)
     p.add_argument("--fixture", required=True)
     p.add_argument("--output", required=True)
