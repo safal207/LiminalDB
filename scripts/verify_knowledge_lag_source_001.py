@@ -138,7 +138,7 @@ def main() -> None:
         int(full["observed_at_ns"]),
     ]
     require(
-        all(left < right for left, right in zip(timeline, timeline[1:], strict=True)),
+        all(left < right for left, right in zip(timeline, timeline[1:])),
         "expected T0 < T0D < T1 < T2 < T3 < T4",
     )
 
