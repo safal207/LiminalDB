@@ -431,12 +431,13 @@ jobs:
             "MATCH (a:Action)-[:HAS_OBSERVATION]->(o:Observation)-[:INFORMS]->(c:Continuity)
              MATCH (a)-[:HAS_RECEIVER_EFFECT]->(truth:Effect)
              OPTIONAL MATCH (o)-[:OBSERVES]->(seen:Effect)
-             RETURN o.availability AS availability,
+             RETURN o.revision AS revision,
+                    o.availability AS availability,
                     o.external_outcome AS external_outcome,
                     count(seen) AS observed_effects,
                     count(DISTINCT truth) AS receiver_effect_count,
                     c.posture AS posture
-             ORDER BY o.revision;" \
+             ORDER BY revision;" \
             > artifacts/neo4j-knowledge-lag-rows.csv
 
       - name: Verify KNOWLEDGE-LAG-001 cross-store invariants
