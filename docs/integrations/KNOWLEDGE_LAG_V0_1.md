@@ -148,6 +148,26 @@ This is the core bitemporal statement:
 
 > Later evidence can change what the system currently knows about T1 without rewriting what the system knew before that evidence arrived.
 
+## Execution-order acceptance
+
+The workflow order is itself part of the proof and must not be rearranged:
+
+```text
+insert T3 UNAVAILABLE
+capture XTDB system-time S3
+query valid-time T1 AS OF S3
+assert INDETERMINATE / REVALIDATE
+
+only then:
+
+perform source T4 FULL readback
+insert T4 FULL knowledge
+re-query valid-time T1 AS OF S3
+assert the earlier state is still unchanged
+```
+
+A run that performs T4 before freezing the T3 witness does not satisfy KNOWLEDGE-LAG-001.
+
 ## Important clock distinction
 
 Three time domains remain separate:
