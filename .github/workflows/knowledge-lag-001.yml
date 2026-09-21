@@ -1,0 +1,453 @@
+name: Knowledge Lag 001
+
+on:
+  workflow_dispatch:
+  pull_request:
+    branches:
+      - main
+      - feat/evidence-plane-durability-001
+    paths:
+      - "scripts/knowledge_lag_001.py"
+      - "scripts/verify_knowledge_lag_source_001.py"
+      - "docs/integrations/KNOWLEDGE_LAG_V0_1.md"
+      - ".github/workflows/knowledge-lag-001.yml"
+      - "liminal-db/crates/liminal-store/tests/knowledge_lag_fixture.rs"
+      - "liminal-db/crates/liminal-store/tests/fixtures/knowledge_lag_v0.1.json"
+
+permissions:
+  contents: read
+
+env:
+  EXACT_HEAD: ${{ github.event.pull_request.head.sha || github.sha }}
+  FIXTURE: liminal-db/crates/liminal-store/tests/fixtures/knowledge_lag_v0.1.json
+  PGHOST: localhost
+  PGPORT: "5432"
+  PGUSER: xtdb
+  PGDATABASE: xtdb
+  NEO4J_IMAGE: neo4j:2026.08.1
+
+jobs:
+  verify:
+    runs-on: ubuntu-latest
+    timeout-minutes: 35
+
+    services:
+      xtdb:
+        image: ghcr.io/xtdb/xtdb:2.1.0
+        ports:
+          - 5432:5432
+          - 8080:8080
+
+    steps:
+      - name: Checkout exact PR head
+        uses: actions/checkout@v6
+        with:
+          ref: ${{ env.EXACT_HEAD }}
+          fetch-depth: 1
+          persist-credentials: false
+
+      - name: Verify exact checked-out head
+        shell: bash
+        run: |
+          set -euo pipefail
+          test "$(git rev-parse HEAD)" = "$EXACT_HEAD"
+
+      - name: Set up Python
+        uses: actions/setup-python@v6
+        with:
+          python-version: "3.12"
+
+      - name: Set up Rust
+        uses: dtolnay/rust-toolchain@stable
+
+      - name: Install PostgreSQL client
+        shell: bash
+        run: |
+          set -euo pipefail
+          sudo apt-get update
+          sudo apt-get install -y postgresql-client
+
+      - name: Wait for XTDB
+        shell: bash
+        run: |
+          set -euo pipefail
+          for attempt in $(seq 1 60); do
+            if curl --fail --silent http://localhost:8080/healthz/alive >/dev/null; then
+              echo "XTDB alive after $attempt attempts"
+              exit 0
+            fi
+            sleep 1
+          done
+          echo "XTDB did not become healthy" >&2
+          exit 1
+
+      - name: Compile source and verifier
+        shell: bash
+        run: |
+          set -euo pipefail
+          python3 -m py_compile \
+            scripts/knowledge_lag_001.py \
+            scripts/verify_knowledge_lag_source_001.py
+          mkdir -p artifacts/source
+
+      - name: T0 admit action before dispatch
+        shell: bash
+        run: |
+          set -euo pipefail
+          python3 scripts/knowledge_lag_001.py admit \
+            --control artifacts/source/control.sqlite \
+            --receiver artifacts/source/receiver.sqlite \
+            --observer artifacts/source/observer.sqlite \
+            | tee artifacts/source/t0-admit.json
+
+      - name: T0D start one provider dispatch
+        shell: bash
+        run: |
+          set -euo pipefail
+          python3 scripts/knowledge_lag_001.py dispatch \
+            --control artifacts/source/control.sqlite \
+            --receiver artifacts/source/receiver.sqlite \
+            --observer artifacts/source/observer.sqlite \
+            | tee artifacts/source/t0d-dispatch.json
+
+      - name: T1 receiver commits external effect
+        shell: bash
+        run: |
+          set -euo pipefail
+          python3 scripts/knowledge_lag_001.py effect \
+            --control artifacts/source/control.sqlite \
+            --receiver artifacts/source/receiver.sqlite \
+            --observer artifacts/source/observer.sqlite \
+            | tee artifacts/source/t1-effect.json
+
+          python3 - <<'PY'
+          import sqlite3
+          from pathlib import Path
+          db = Path("artifacts/source/receiver.sqlite")
+          with sqlite3.connect(f"file:{db}?mode=ro", uri=True) as conn:
+              row = conn.execute(
+                  "select action_id, committed_at_utc from effects order by committed_at_ns limit 1"
+              ).fetchone()
+          if row is None:
+              raise SystemExit("missing receiver effect")
+          Path("artifacts/action-id.txt").write_text(row[0] + "\n")
+          Path("artifacts/effect-valid-time.txt").write_text(row[1] + "\n")
+          print({"action_id": row[0], "effect_valid_time": row[1]})
+          PY
+
+      - name: T2 runtime records SUCCESS claim
+        shell: bash
+        run: |
+          set -euo pipefail
+          python3 scripts/knowledge_lag_001.py claim \
+            --control artifacts/source/control.sqlite \
+            --receiver artifacts/source/receiver.sqlite \
+            --observer artifacts/source/observer.sqlite \
+            | tee artifacts/source/t2-claim.json
+
+      - name: Insert T2 CLAIM_ONLY knowledge into XTDB
+        shell: bash
+        run: |
+          set -euo pipefail
+          python3 scripts/knowledge_lag_001.py xtdb-phase \
+            --phase claim \
+            --control artifacts/source/control.sqlite \
+            --receiver artifacts/source/receiver.sqlite \
+            --observer artifacts/source/observer.sqlite \
+            --fixture "$FIXTURE" \
+            --output artifacts/xtdb-claim.sql \
+            | tee artifacts/xtdb-claim-prepare.json
+
+          psql -X -v ON_ERROR_STOP=1 -f artifacts/xtdb-claim.sql
+
+          S_CLAIM="$(psql -X -At -v ON_ERROR_STOP=1 \
+            -c "SELECT system_time FROM xt.txs WHERE committed = true ORDER BY _id DESC LIMIT 1" \
+            | tail -n1 | tr -d '"')"
+          test -n "$S_CLAIM"
+          printf '%s\n' "$S_CLAIM" > artifacts/system-time-claim.txt
+
+          VALID="$(cat artifacts/effect-valid-time.txt)"
+          VALID_SQL="${VALID/+00:00/Z}"
+          ACTION_ID="$(cat artifacts/action-id.txt)"
+          cols='_id, knowledge_state, source_event_time, effect_committed_at, external_outcome, observation_availability, externally_verified, effect_count, liminal_continuity_posture, _valid_from, _system_from, _system_to'
+
+          psql -X --csv -v ON_ERROR_STOP=1 \
+            -c "SELECT $cols FROM knowledge_lag_evidence FOR SYSTEM_TIME AS OF TIMESTAMP '$S_CLAIM' FOR VALID_TIME AS OF TIMESTAMP '$VALID_SQL' WHERE _id='$ACTION_ID'" \
+            > artifacts/xtdb-witness-claim.csv
+
+      - name: T3 observer readback is unavailable
+        shell: bash
+        run: |
+          set -euo pipefail
+          python3 scripts/knowledge_lag_001.py unavailable \
+            --control artifacts/source/control.sqlite \
+            --receiver artifacts/source/receiver.sqlite \
+            --observer artifacts/source/observer.sqlite \
+            | tee artifacts/source/t3-unavailable.json
+
+      - name: Insert T3 UNAVAILABLE knowledge and freeze earlier system-time witness
+        shell: bash
+        run: |
+          set -euo pipefail
+          python3 scripts/knowledge_lag_001.py xtdb-phase \
+            --phase unavailable \
+            --control artifacts/source/control.sqlite \
+            --receiver artifacts/source/receiver.sqlite \
+            --observer artifacts/source/observer.sqlite \
+            --fixture "$FIXTURE" \
+            --output artifacts/xtdb-unavailable.sql \
+            | tee artifacts/xtdb-unavailable-prepare.json
+
+          psql -X -v ON_ERROR_STOP=1 -f artifacts/xtdb-unavailable.sql
+
+          S_UNAVAILABLE="$(psql -X -At -v ON_ERROR_STOP=1 \
+            -c "SELECT system_time FROM xt.txs WHERE committed = true ORDER BY _id DESC LIMIT 1" \
+            | tail -n1 | tr -d '"')"
+          test -n "$S_UNAVAILABLE"
+          printf '%s\n' "$S_UNAVAILABLE" > artifacts/system-time-unavailable.txt
+
+          VALID="$(cat artifacts/effect-valid-time.txt)"
+          VALID_SQL="${VALID/+00:00/Z}"
+          ACTION_ID="$(cat artifacts/action-id.txt)"
+          cols='_id, knowledge_state, source_event_time, effect_committed_at, external_outcome, observation_availability, externally_verified, effect_count, liminal_continuity_posture, _valid_from, _system_from, _system_to'
+
+          psql -X --csv -v ON_ERROR_STOP=1 \
+            -c "SELECT $cols FROM knowledge_lag_evidence FOR SYSTEM_TIME AS OF TIMESTAMP '$S_UNAVAILABLE' FOR VALID_TIME AS OF TIMESTAMP '$VALID_SQL' WHERE _id='$ACTION_ID'" \
+            > artifacts/xtdb-witness-unavailable-before-full.csv
+
+          python3 - <<'PY'
+          import csv
+          from pathlib import Path
+          rows = list(csv.DictReader(
+              Path("artifacts/xtdb-witness-unavailable-before-full.csv").open(),
+              skipinitialspace=True,
+          ))
+          assert len(rows) == 1, rows
+          row = rows[0]
+          assert row["knowledge_state"] == "READBACK_UNAVAILABLE", row
+          assert row["external_outcome"] == "INDETERMINATE", row
+          assert row["liminal_continuity_posture"] == "REVALIDATE", row
+          print({
+              "pre_T4_witness": "PASS",
+              "knowledge_state": row["knowledge_state"],
+              "external_outcome": row["external_outcome"],
+          })
+          PY
+
+      - name: T4 observer obtains FULL readback of T1 effect
+        shell: bash
+        run: |
+          set -euo pipefail
+          # This is intentionally after the T3 XTDB witness above.
+          python3 scripts/knowledge_lag_001.py full \
+            --control artifacts/source/control.sqlite \
+            --receiver artifacts/source/receiver.sqlite \
+            --observer artifacts/source/observer.sqlite \
+            | tee artifacts/source/t4-full.json
+
+      - name: Insert T4 FULL knowledge into XTDB
+        shell: bash
+        run: |
+          set -euo pipefail
+          python3 scripts/knowledge_lag_001.py xtdb-phase \
+            --phase full \
+            --control artifacts/source/control.sqlite \
+            --receiver artifacts/source/receiver.sqlite \
+            --observer artifacts/source/observer.sqlite \
+            --fixture "$FIXTURE" \
+            --output artifacts/xtdb-full.sql \
+            | tee artifacts/xtdb-full-prepare.json
+
+          psql -X -v ON_ERROR_STOP=1 -f artifacts/xtdb-full.sql
+
+          S_FULL="$(psql -X -At -v ON_ERROR_STOP=1 \
+            -c "SELECT system_time FROM xt.txs WHERE committed = true ORDER BY _id DESC LIMIT 1" \
+            | tail -n1 | tr -d '"')"
+          test -n "$S_FULL"
+          printf '%s\n' "$S_FULL" > artifacts/system-time-full.txt
+
+      - name: Capture retroactive bitemporal witnesses
+        shell: bash
+        run: |
+          set -euo pipefail
+          S_UNAVAILABLE="$(cat artifacts/system-time-unavailable.txt)"
+          S_FULL="$(cat artifacts/system-time-full.txt)"
+          VALID="$(cat artifacts/effect-valid-time.txt)"
+          VALID_SQL="${VALID/+00:00/Z}"
+          ACTION_ID="$(cat artifacts/action-id.txt)"
+          cols='_id, knowledge_state, source_event_time, effect_committed_at, external_outcome, observation_availability, externally_verified, effect_count, liminal_continuity_posture, _valid_from, _system_from, _system_to'
+
+          psql -X --csv -v ON_ERROR_STOP=1 \
+            -c "SELECT $cols FROM knowledge_lag_evidence FOR SYSTEM_TIME AS OF TIMESTAMP '$S_UNAVAILABLE' FOR VALID_TIME AS OF TIMESTAMP '$VALID_SQL' WHERE _id='$ACTION_ID'" \
+            > artifacts/xtdb-witness-unavailable-after-full.csv
+
+          psql -X --csv -v ON_ERROR_STOP=1 \
+            -c "SELECT $cols FROM knowledge_lag_evidence FOR SYSTEM_TIME AS OF TIMESTAMP '$S_FULL' FOR VALID_TIME AS OF TIMESTAMP '$VALID_SQL' WHERE _id='$ACTION_ID'" \
+            > artifacts/xtdb-witness-full.csv
+
+          psql -X --csv -v ON_ERROR_STOP=1 \
+            -c "SELECT $cols FROM knowledge_lag_evidence ORDER BY _id" \
+            > artifacts/xtdb-current.csv
+
+          psql -X --csv -v ON_ERROR_STOP=1 \
+            -c "SELECT $cols FROM knowledge_lag_evidence FOR SYSTEM_TIME ALL FOR VALID_TIME ALL ORDER BY _system_from" \
+            > artifacts/xtdb-history.csv
+
+      - name: Assemble and independently verify source authority timeline
+        shell: bash
+        run: |
+          set -euo pipefail
+          python3 scripts/knowledge_lag_001.py source-report \
+            --control artifacts/source/control.sqlite \
+            --receiver artifacts/source/receiver.sqlite \
+            --observer artifacts/source/observer.sqlite \
+            --report artifacts/knowledge-lag-source-report.json \
+            | tee artifacts/knowledge-lag-source-report-build.json
+
+          python3 scripts/verify_knowledge_lag_source_001.py \
+            --control artifacts/source/control.sqlite \
+            --receiver artifacts/source/receiver.sqlite \
+            --observer artifacts/source/observer.sqlite \
+            --report artifacts/knowledge-lag-source-report.json \
+            --output artifacts/knowledge-lag-source-verification.json
+
+      - name: Build final envelope and Neo4j projection
+        shell: bash
+        run: |
+          set -euo pipefail
+          python3 scripts/knowledge_lag_001.py build-final \
+            --source-report artifacts/knowledge-lag-source-report.json \
+            --fixture "$FIXTURE" \
+            --envelope artifacts/knowledge-lag-envelope.json \
+            --neo4j-load artifacts/knowledge-lag-load.cypher \
+            --neo4j-verify artifacts/knowledge-lag-verify.cypher \
+            | tee artifacts/knowledge-lag-final-build.json
+
+      - name: Run native LiminalDB knowledge-lag mapping
+        shell: bash
+        run: |
+          set -euo pipefail
+          cargo test --locked -p liminal-store \
+            --test knowledge_lag_fixture -- --nocapture \
+            | tee artifacts/liminaldb-knowledge-lag.txt
+          printf 'PASS\n' > artifacts/liminaldb-knowledge-lag-marker.txt
+
+      - name: Start Neo4j
+        shell: bash
+        run: |
+          set -euo pipefail
+          docker pull "$NEO4J_IMAGE"
+          docker run --detach --name knowledge-lag-neo4j \
+            --publish 7474:7474 \
+            --publish 7687:7687 \
+            --env "NEO4J_AUTH=none" \
+            "$NEO4J_IMAGE"
+
+      - name: Wait for Neo4j
+        shell: bash
+        run: |
+          set -euo pipefail
+          for attempt in $(seq 1 90); do
+            if docker exec knowledge-lag-neo4j cypher-shell \
+              --format plain "RETURN 1 AS ready;" >/dev/null 2>&1; then
+              echo "Neo4j ready after $attempt attempts"
+              exit 0
+            fi
+            sleep 1
+          done
+          docker logs knowledge-lag-neo4j
+          exit 1
+
+      - name: Load and verify Neo4j explanation graph
+        shell: bash
+        run: |
+          set -euo pipefail
+          docker exec -i knowledge-lag-neo4j cypher-shell \
+            --format plain < artifacts/knowledge-lag-load.cypher \
+            | tee artifacts/neo4j-knowledge-lag-load.txt
+
+          docker exec -i knowledge-lag-neo4j cypher-shell \
+            --format plain < artifacts/knowledge-lag-verify.cypher \
+            | tee artifacts/neo4j-knowledge-lag-checks.txt
+
+          python3 - <<'PY'
+          from pathlib import Path
+          seen = {}
+          for raw in Path("artifacts/neo4j-knowledge-lag-checks.txt").read_text().splitlines():
+              line = raw.strip().strip('"')
+              if "CHECK|" not in line:
+                  continue
+              line = line[line.index("CHECK|"):]
+              parts = line.split("|")
+              if len(parts) != 4:
+                  continue
+              name = parts[1]
+              actual = int(parts[2])
+              expected = int(parts[3])
+              seen[name] = (actual, expected)
+          if len(seen) != 6:
+              raise SystemExit(f"expected 6 Neo4j checks, got {len(seen)}")
+          failures = {
+              name: {"actual": actual, "expected": expected}
+              for name, (actual, expected) in seen.items()
+              if actual != expected
+          }
+          if failures:
+              raise SystemExit("Neo4j checks failed: " + repr(failures))
+          print({"neo4j_checks": len(seen), "status": "PASS"})
+          PY
+
+          docker exec knowledge-lag-neo4j cypher-shell --format plain \
+            "MATCH (a:Action)-[:HAS_OBSERVATION]->(o:Observation)-[:INFORMS]->(c:Continuity)
+             MATCH (a)-[:HAS_RECEIVER_EFFECT]->(truth:Effect)
+             OPTIONAL MATCH (o)-[:OBSERVES]->(seen:Effect)
+             RETURN o.availability AS availability,
+                    o.external_outcome AS external_outcome,
+                    count(seen) AS observed_effects,
+                    count(DISTINCT truth) AS receiver_effect_count,
+                    c.posture AS posture
+             ORDER BY o.revision;" \
+            > artifacts/neo4j-knowledge-lag-rows.csv
+
+      - name: Verify KNOWLEDGE-LAG-001 cross-store invariants
+        shell: bash
+        run: |
+          set -euo pipefail
+          python3 scripts/knowledge_lag_001.py verify \
+            --envelope artifacts/knowledge-lag-envelope.json \
+            --xtdb-current artifacts/xtdb-current.csv \
+            --xtdb-history artifacts/xtdb-history.csv \
+            --witness-claim artifacts/xtdb-witness-claim.csv \
+            --witness-unavailable artifacts/xtdb-witness-unavailable-before-full.csv \
+            --witness-unavailable-after artifacts/xtdb-witness-unavailable-after-full.csv \
+            --witness-full artifacts/xtdb-witness-full.csv \
+            --neo4j-rows artifacts/neo4j-knowledge-lag-rows.csv \
+            --liminal-marker artifacts/liminaldb-knowledge-lag-marker.txt \
+            --report artifacts/knowledge-lag-verification.json
+
+          {
+            sha256sum \
+              artifacts/knowledge-lag-source-report.json \
+              artifacts/knowledge-lag-source-verification.json \
+              artifacts/knowledge-lag-envelope.json \
+              artifacts/knowledge-lag-verification.json \
+              artifacts/source/control.sqlite \
+              artifacts/source/receiver.sqlite \
+              artifacts/source/observer.sqlite
+          } | tee artifacts/knowledge-lag-sha256.txt
+
+      - name: Upload KNOWLEDGE-LAG-001 evidence
+        if: always()
+        uses: actions/upload-artifact@v4
+        with:
+          name: knowledge-lag-001
+          path: artifacts/
+          if-no-files-found: warn
+          retention-days: 30
+
+      - name: Stop Neo4j
+        if: always()
+        shell: bash
+        run: |
+          docker logs knowledge-lag-neo4j > artifacts/neo4j-knowledge-lag-container.log 2>&1 || true
+          docker rm -f knowledge-lag-neo4j || true
