@@ -176,6 +176,29 @@ def next_source_time(control: Path, receiver: Path, observer: Path) -> tuple[int
     return value, utc_from_ns(value)
 
 
+def next_observer_time_without_receiver(control: Path, observer: Path) -> tuple[int, str]:
+    candidates = [0]
+    if control.exists():
+        with connect(control, readonly=True) as conn:
+            for query in (
+                "select max(admitted_at_ns) from admissions",
+                "select max(dispatch_started_at_ns) from admissions",
+                "select max(claimed_at_ns) from claims",
+            ):
+                row = conn.execute(query).fetchone()
+                if row and row[0] is not None:
+                    candidates.append(int(row[0]))
+    if observer.exists():
+        with connect(observer, readonly=True) as conn:
+            row = conn.execute("select max(observed_at_ns) from observations").fetchone()
+            if row and row[0] is not None:
+                candidates.append(int(row[0]))
+    previous = max(candidates)
+    now = time.time_ns()
+    value = max(now, previous + 1_000_000)
+    return value, utc_from_ns(value)
+
+
 def write_json(path: Path, value: Any) -> None:
     path.parent.mkdir(parents=True, exist_ok=True)
     path.write_text(json.dumps(value, indent=2, sort_keys=True) + "\n", encoding="utf-8")
@@ -329,7 +352,7 @@ def phase_unavailable(args: argparse.Namespace) -> None:
     if count != 0:
         fail("UNAVAILABLE observation must be first")
 
-    ns, utc = next_source_time(control, receiver, observer)
+    ns, utc = next_observer_time_without_receiver(control, observer)
     with connect(observer) as conn:
         conn.execute(
             """
